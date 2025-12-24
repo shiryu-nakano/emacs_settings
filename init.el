@@ -116,15 +116,19 @@
 
 
 
+;; =======================================================================
+;; Org Directory Configuration
+;; -----------------------------------------------------------------------
+;; org関連のファイルのベースディレクトリを設定します。
+;; このディレクトリを変更すれば、すべてのorg関連ファイルのパスが自動的に更新されます。
+;; =======================================================================
+(setq my/org-base-directory "~/CABiNET/org2")
+
 ;; Orgファイルの保存場所とアジェンダの設定
-;; 練習用
-;;(setq org-directory "~/CABINET")
-(setq org-directory "~/org")
-;;(setq org-agenda-files (list org-directory))
-(setq org-agenda-files '("~/org/inbox.org"
-                         "~/org/projects.org"
-                         "~/org/someday.org"
-			  ))
+(setq org-directory my/org-base-directory)
+(setq org-agenda-files (list (expand-file-name "inbox.org" my/org-base-directory)
+                             (expand-file-name "projects.org" my/org-base-directory)
+                             (expand-file-name "someday.org" my/org-base-directory)))
 
 ;;(setq org-default-notes-file (concat org-directory "/home.org"))
 
@@ -220,7 +224,7 @@ capture の挿入位置として返す。"
       `(
         ;; Inbox
         ("i" "Inbox task" entry
-         (file "~/org/inbox.org")
+         (file (lambda () (expand-file-name "inbox.org" my/org-base-directory)))
          "* INBOX %?\n  Created on %U")
 
 	;; Daily log （日時ログ）
@@ -233,17 +237,17 @@ capture の挿入位置として返す。"
 
 	;; knowledge
 	("k" "Knowledge" entry
-	 (file "~/org/knowledge.org")
+	 (file (lambda () (expand-file-name "knowledge.org" my/org-base-directory)))
 	  "* %?\n  Created on %U")
 
 	;;temp
 	("t" "Temp" entry
-	 (file "~/org/temp.org")
+	 (file (lambda () (expand-file-name "temp.org" my/org-base-directory)))
 	 "* %?\n  Created on %U")
 
 	;;temp
 	("r" "research idea" entry
-	 (file "~/org/idea.org")
+	 (file (lambda () (expand-file-name "idea.org" my/org-base-directory)))
 	 "* %?\n  Created on %U")
 	)
       )
@@ -251,10 +255,10 @@ capture の挿入位置として返す。"
 
 ;; Refile 設定（inbox から projects / someday に送る）
 (setq org-refile-targets
-      '(("~/org/projects.org" :maxlevel . 1)
-        ("~/org/someday.org"  :maxlevel . 1)
-	("~/org/tips.org"  :maxlevel . 1)
-	("~/org/papers.org"  :maxlevel . 1)
+      `((,(expand-file-name "projects.org" my/org-base-directory) :maxlevel . 1)
+        (,(expand-file-name "someday.org" my/org-base-directory)  :maxlevel . 1)
+	(,(expand-file-name "tips.org" my/org-base-directory)  :maxlevel . 1)
+	(,(expand-file-name "papers.org" my/org-base-directory)  :maxlevel . 1)
 	))
 
 (setq org-outline-path-complete-in-steps nil) ; 一発でパス補完
@@ -325,7 +329,7 @@ capture の挿入位置として返す。"
 
           ;; 5. Someday の見直し
           (tags-todo "HOLD"
-                     ((org-agenda-files '("~/org/someday.org"))
+                     ((org-agenda-files (list (expand-file-name "someday.org" my/org-base-directory)))
                       (org-agenda-overriding-header "⑤ Someday / Maybe の棚卸し")))
           )
          )
@@ -410,9 +414,9 @@ capture の挿入位置として返す。"
 ;; 仮想環境の管理
 (use-package pyvenv
   :ensure t
-  :hook (python-mode . pyvenv-mode)) ; .pyファイルを開いたらpyvenvを有効化
+  :hook (python-mode . pyvenv-mode) ; .pyファイルを開いたらpyvenvを有効化
   :config ;; pyenvが管理する仮想環境の場所を教える
-  (setenv "WORKON_HOME" "~/.pyenv/versions")
+  (setenv "WORKON_HOME" "~/.pyenv/versions"))
 
 ;; git操作
 (use-package magit
