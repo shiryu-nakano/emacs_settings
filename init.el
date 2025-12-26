@@ -13,18 +13,25 @@
 (add-to-list 'package-archives
              '("melpa" . "https://melpa.org/packages/") t)
 
-
-
 (package-initialize)
 
-(unless (package-installed-p 'ox-hugo)
-  (package-refresh-contents)
-  (package-install 'ox-hugo))
-
-(require 'ox-hugo)
 ;; パッケージキャッシュがなければ更新
 (when (not package-archive-contents)
   (package-refresh-contents))
+
+;; 不足パッケージの自動インストール関数
+(defun ensure-package-installed (package)
+  "パッケージが未インストールなら自動インストール"
+  (unless (package-installed-p package)
+    (unless package-archive-contents (package-refresh-contents))
+    (package-install package)))
+
+;; 必要パッケージの自動インストール
+(ensure-package-installed 'ox-hugo)
+(ensure-package-installed 'evil)
+(ensure-package-installed 'key-chord)
+
+(require 'ox-hugo)
 
 
 ;; =======================================================================
@@ -37,6 +44,13 @@
 ;;(load-theme 'material t)            ;; `material`テーマを読み込み
 (global-display-line-numbers-mode t) ;; 行番号を常に表示
 
+;; 便利なキーバインド設定
+(global-set-key (kbd "C-c e i")
+                (lambda () (interactive) (find-file user-init-file)))  ;; init.elを一発で開く
+
+;; デバッグ用
+(setq debug-on-error t)
+
 
 ;; =======================================================================
 ;; §3. Evil (Vimキーバインド) の設定
@@ -44,11 +58,11 @@
 ;; Vimのようなモーダル編集を可能にします。
 ;; =======================================================================
 
-(require 'evil)
-(evil-mode 1) ;; Evilモードを有効化
+(when (require 'evil nil 'noerror)
+  (evil-mode 1)) ;; Evilモードを有効化
 
 ;; "jj"でインサートモードからノーマルモードへ移行
-(require 'key-chord)
+(when (require 'key-chord nil 'noerror))
 (setq key-chord-two-keys-delay 0.5)
 (key-chord-mode 1)
 (key-chord-define evil-insert-state-map "jj" 'evil-normal-state)
@@ -122,7 +136,15 @@
 ;; org関連のファイルのベースディレクトリを設定します。
 ;; このディレクトリを変更すれば、すべてのorg関連ファイルのパスが自動的に更新されます。
 ;; =======================================================================
-(setq my/org-base-directory "~/CABiNET/org2")
+
+;; OS別にorg-directoryを設定
+(setq my/org-base-directory
+      (cond
+       ((eq system-type 'darwin)        ; macOS
+        "~/CABiNET/org2")
+       ((eq system-type 'windows-nt)    ; Windows  
+        "C:/Users/Owner/CABiNET/org2")  ; 実際のWindows上のCABiNETディレクトリ
+       (t "~/CABiNET/org2")))           ; その他のOS（Ubuntu等）
 
 ;; Orgファイルの保存場所とアジェンダの設定
 (setq org-directory my/org-base-directory)
