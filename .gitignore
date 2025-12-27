@@ -4,3 +4,4 @@
 # But keep init.el
 !init.el
 !.gitignore
+!README.md
