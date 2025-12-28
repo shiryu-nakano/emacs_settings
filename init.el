@@ -162,14 +162,29 @@
 ;;   "~/org"))
 
 
-
-
-
 ;;日時ログ用のヘルパー関数
+
+;; 前日のファイルから指定セクションの内容を取得
+(defun my/get-section-content-from-file (file section-name)
+  "FILE から SECTION-NAME 見出しの内容（サブツリー全体）を返す。
+見出しが存在しない場合は空文字列を返す。"
+  (if (file-exists-p file)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (org-mode)
+        (goto-char (point-min))
+        (if (re-search-forward (concat "^\\* " (regexp-quote section-name) "\\b") nil t)
+            (let ((start (line-beginning-position)))
+              (org-end-of-subtree t t)
+              (buffer-substring-no-properties start (point)))
+          ""))
+    ""))
+
 (defun my/org-daily-log-target ()
   "日次ログ用ファイル ~/org/daily/YYYY/MM/YYYY-MM-DD.org の
 * LOG 見出しの末尾（子見出しと本文を含むサブツリーの終わり）を
-capture の挿入位置として返す。"
+capture の挿入位置として返す。
+新規ファイル作成時は前日のファイルから TASK, タスク整理, 直近の予定締め切り をコピーする。"
   (let* ((base-dir (expand-file-name "daily" org-directory))
          (rel-path (format-time-string "%Y/%m/%Y-%m-%d.org"))
          (file     (expand-file-name rel-path base-dir))
@@ -180,14 +195,34 @@ capture の挿入位置として返す。"
     (set-buffer (find-file-noselect file))
     ;; 新規ファイルならヘッダと骨組みを挿入
     (when new-file
-      (erase-buffer)
-      (insert (format "#+title: %s\n#+filetags: :daily:\n\n"
-                      (format-time-string "%Y-%m-%d")))
-      (insert "* 直近の予定締め切り\n\n")
-      (insert "* TASK\n\n")
-      (insert "* LOG\n\n")
-      (insert "* タスク整理\n\n")
-      (insert "* 所感\n\n"))
+      ;; 前日のファイルパスを計算（月またぎに対応）
+      (let* ((yesterday (time-subtract (current-time) (days-to-time 1)))
+             (yesterday-rel-path (format-time-string "%Y/%m/%Y-%m-%d.org" yesterday))
+             (yesterday-file (expand-file-name yesterday-rel-path base-dir))
+             ;; 前日のファイルから各セクションを取得
+             (task-content (my/get-section-content-from-file yesterday-file "TASK"))
+             (task-organize-content (my/get-section-content-from-file yesterday-file "タスク整理"))
+             (deadline-content (my/get-section-content-from-file yesterday-file "直近の予定締め切り")))
+        (erase-buffer)
+        (insert (format "#+title: %s\n#+filetags: :daily:\n\n"
+                        (format-time-string "%Y-%m-%d")))
+        ;; 前日からコピーするか、空のセクションを作成
+        (if (string-empty-p deadline-content)
+            (insert "* 直近の予定締め切り\n\n")
+          (insert deadline-content "\n"))
+        (if (string-empty-p task-content)
+            (insert "* TASK\n\n")
+          (insert task-content "\n"))
+        (insert "* LOG\n\n")
+        (if (string-empty-p task-organize-content)
+            (insert "* タスク整理\n\n")
+          (insert task-organize-content "\n"))
+        (insert "* 所感\n")
+        (insert "** フリーランス\n\n")
+        (insert "** 勉強\n\n")
+        (insert "** 研究\n\n")
+        (insert "** 海外研究\n\n")
+        (insert "** 音楽\n\n")))
     ;; * LOG を探して、そのサブツリーの末尾へ
     (goto-char (point-min))
     (if (re-search-forward "^\\* LOG\\b" nil t)
@@ -223,7 +258,6 @@ capture の挿入位置として返す。"
       (format " :%s:" (upcase choice))))) ; 例: :arcanain2025:
 
 
-
 (defun my/open-today-daily-log ()
   "今日の日次ログファイルを一発で開く。
 必要ならファイルと見出しを作成する。"
@@ -237,9 +271,8 @@ capture の挿入位置として返す。"
     (when (re-search-forward "^\\* LOG\\b" nil t)
       (forward-line 1)))
 )
+
 (global-set-key (kbd "C-c n d") #'my/open-today-daily-log)
-
-
 
 ;; org captureのショートカット設定
 (setq org-capture-templates
@@ -373,10 +406,6 @@ capture の挿入位置として返す。"
 ;;         "* 直近の予定締め切り\n\n\n* TASK\n\n* LOG\n** %<%H:%M>\n%?\n\n* タスク整理\n\n* 所感\n"
 ;;         :target (file+head "%<%Y/%m/%Y-%m-%d>.org"
 ;;                            "#+title: %<%Y-%m-%d>\n#+filetags: :daily:\n\n"))))
-
-
-
-
 
 
 ;; ====== 練習用↑
