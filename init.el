@@ -30,6 +30,7 @@
 (ensure-package-installed 'ox-hugo)
 (ensure-package-installed 'evil)
 (ensure-package-installed 'key-chord)
+(ensure-package-installed 'atom-one-dark-theme)
 
 (require 'ox-hugo)
 
@@ -42,6 +43,7 @@
 
 (setq inhibit-startup-message t)    ;; 起動メッセージを非表示に
 ;;(load-theme 'material t)            ;; `material`テーマを読み込み
+(load-theme 'atom-one-dark t)
 (global-display-line-numbers-mode t) ;; 行番号を常に表示
 
 ;; 便利なキーバインド設定
@@ -54,7 +56,7 @@
 
 ;; =======================================================================
 ;; §3. Evil (Vimキーバインド) の設定
-;; -----------------------------------------------------------------------
+;; -----
 ;; Vimのようなモーダル編集を可能にします。
 ;; =======================================================================
 
@@ -171,7 +173,7 @@
   (if (file-exists-p file)
       (with-temp-buffer
         (insert-file-contents file)
-        (org-mode)
+        (delay-mode-hooks (org-mode))
         (goto-char (point-min))
         (if (re-search-forward (concat "^\\* " (regexp-quote section-name) "\\b") nil t)
             (let ((start (line-beginning-position)))
@@ -184,7 +186,7 @@
   "日次ログ用ファイル ~/org/daily/YYYY/MM/YYYY-MM-DD.org の
 * LOG 見出しの末尾（子見出しと本文を含むサブツリーの終わり）を
 capture の挿入位置として返す。
-新規ファイル作成時は前日のファイルから TASK, タスク整理, 直近の予定締め切り をコピーする。"
+新規ファイル作成時は前日のファイルから Home, 直近の予定締め切り, TASK, TASK整理, Agile をコピーする。"
   (let* ((base-dir (expand-file-name "daily" org-directory))
          (rel-path (format-time-string "%Y/%m/%Y-%m-%d.org"))
          (file     (expand-file-name rel-path base-dir))
@@ -200,13 +202,18 @@ capture の挿入位置として返す。
              (yesterday-rel-path (format-time-string "%Y/%m/%Y-%m-%d.org" yesterday))
              (yesterday-file (expand-file-name yesterday-rel-path base-dir))
              ;; 前日のファイルから各セクションを取得
+             (home-content (my/get-section-content-from-file yesterday-file "Home"))
+             (deadline-content (my/get-section-content-from-file yesterday-file "直近の予定締め切り"))
              (task-content (my/get-section-content-from-file yesterday-file "TASK"))
              (task-organize-content (my/get-section-content-from-file yesterday-file "タスク整理"))
-             (deadline-content (my/get-section-content-from-file yesterday-file "直近の予定締め切り")))
+             (agile-content (my/get-section-content-from-file yesterday-file "Agile")))
         (erase-buffer)
         (insert (format "#+title: %s\n#+filetags: :daily:\n\n"
                         (format-time-string "%Y-%m-%d")))
         ;; 前日からコピーするか、空のセクションを作成
+        (if (string-empty-p home-content)
+            (insert "* Home\n\n")
+          (insert home-content "\n"))
         (if (string-empty-p deadline-content)
             (insert "* 直近の予定締め切り\n\n")
           (insert deadline-content "\n"))
@@ -217,12 +224,16 @@ capture の挿入位置として返す。
         (if (string-empty-p task-organize-content)
             (insert "* タスク整理\n\n")
           (insert task-organize-content "\n"))
-        (insert "* 所感\n")
-        (insert "** フリーランス\n\n")
-        (insert "** 勉強\n\n")
-        (insert "** 研究\n\n")
-        (insert "** 海外研究\n\n")
-        (insert "** 音楽\n\n")))
+        (if (string-empty-p agile-content)
+            (progn
+              (insert "* Agile\n")
+              (insert "** Engineer\n\n")
+              (insert "** Study\n\n")
+              (insert "** 研究\n\n")
+              (insert "** 海外研究\n\n")
+              (insert "** 音楽\n\n"))
+          (insert agile-content "\n"))
+        (insert "* 所感\n\n")))
     ;; * LOG を探して、そのサブツリーの末尾へ
     (goto-char (point-min))
     (if (re-search-forward "^\\* LOG\\b" nil t)
@@ -489,7 +500,7 @@ capture の挿入位置として返す。
  ;; If there is more than one, they won't work right.
  '(custom-enabled-themes '(tango-dark))
  '(package-selected-packages
-   '(org-super-agenda org-bullets ox-hugo py-autopep8 material-theme magit key-chord flycheck evil elpy ein dap-mode blacken better-defaults)))
+   '(atom-one-dark-theme org-super-agenda org-bullets ox-hugo py-autopep8 material-theme magit key-chord flycheck evil elpy ein dap-mode blacken better-defaults)))
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.
