@@ -49,6 +49,9 @@
 ;; 便利なキーバインド設定
 (global-set-key (kbd "C-c e i")
                 (lambda () (interactive) (find-file user-init-file)))  ;; init.elを一発で開く
+(global-set-key (kbd "C-c e p")
+                (lambda () (interactive)
+                  (find-file (expand-file-name "projects.org" my/org-base-directory))))  ;; projects.orgを一発で開く
 
 ;; デバッグ用
 (setq debug-on-error t)
@@ -325,6 +328,7 @@ capture の挿入位置として返す。
         (,(expand-file-name "someday.org" my/org-base-directory)  :maxlevel . 1)
 	(,(expand-file-name "tips.org" my/org-base-directory)  :maxlevel . 1)
 	(,(expand-file-name "papers.org" my/org-base-directory)  :maxlevel . 1)
+	(,(expand-file-name "archive.org" my/org-base-directory)  :maxlevel . 1)
 	))
 
 (setq org-outline-path-complete-in-steps nil) ; 一発でパス補完
@@ -339,17 +343,19 @@ capture の挿入位置として返す。
       '((sequence
          "INBOX(i)"   ; 未整理
          "NEXT(n)"    ; 次にとるべき行動
+         "WIP(c)"     ; 作業中
          "WAIT(w)"    ; 待ち状態
          "HOLD(h)"    ; 保留
          "|"
          "DONE(d)"    ; 完了
-         "CANCEL(c)"  ; 中止
+         "CANCEL(x)"  ; 中止
          )))
 
 ;; 見た目上わかりやすく
 (setq org-todo-keyword-faces
       '(("INBOX" . "orange")
         ("NEXT"  . "cyan")
+        ("WIP"   . "deep sky blue")
         ("WAIT"  . "yellow")
         ("HOLD"  . "magenta")
         ("CANCEL" . "grey")))
@@ -357,11 +363,11 @@ capture の挿入位置として返す。
 
 (setq org-agenda-custom-commands
        '(("n" "Next Actions"
-         ((todo "NEXT")))
+         ((todo "NEXT|WIP")))
         ("w" "Waiting"
-         ((todo "WAIT")))
+         ((todo "WAIT|WIP")))
         ("h" "On Hold"
-         ((todo "HOLD")))))
+         ((todo "HOLD|WIP")))))
 
 
 
