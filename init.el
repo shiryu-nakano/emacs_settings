@@ -143,7 +143,7 @@
        ((eq system-type 'darwin)        ; macOS
         "~/CABiNET/org2")
        ((eq system-type 'windows-nt)    ; Windows  
-        "C:/Users/Owner/CABiNET/org2")  ; 実際のWindows上のCABiNETディレクトリ
+        "C:/Users/NakanoShiryu/Documents/CABiNET/org2")  ; 実際のWindows上のCABiNETディレクトリ
        (t "~/CABiNET/org2")))           ; その他のOS（Ubuntu等）
 
 ;; Orgファイルの保存場所とアジェンダの設定
