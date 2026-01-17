@@ -43,7 +43,7 @@
 
 (setq inhibit-startup-message t)    ;; 起動メッセージを非表示に
 ;;(load-theme 'material t)            ;; `material`テーマを読み込み
-(load-theme 'atom-one-dark t)
+(load-theme 'tango-dark t)
 (global-display-line-numbers-mode t) ;; 行番号を常に表示
 
 ;; 便利なキーバインド設定
@@ -81,10 +81,23 @@
 (use-package org-super-agenda
   :ensure t
   :config
-  (org-super-agenda-mode))
-
-(setq org-super-agenda-groups
-      '((:auto-parent t)))  ;; 親見出しごとに自動グループ化
+  (org-super-agenda-mode)
+  (defun my/org-super-agenda-project-top-level (item)
+    "Return top-level heading for ITEM only in projects.org."
+    (let ((marker (org-super-agenda--get-marker item)))
+      (when marker
+        (org-super-agenda--when-with-marker-buffer marker
+          (let ((file (buffer-file-name)))
+            (when (and file
+                       (string-equal (file-truename file)
+                                     (file-truename (expand-file-name "projects.org" my/org-base-directory))))
+              (org-back-to-heading t)
+              (while (> (org-outline-level) 1)
+                (org-up-heading-safe))
+              (org-get-heading t t t t)))))))
+  (setq org-super-agenda-groups
+        '((:auto-map my/org-super-agenda-project-top-level)
+          (:auto-parent t))))
 
 
 ;; org-bullets: 見出しの * を丸いアイコンにしてくれる
@@ -153,11 +166,67 @@
 
 ;; Orgファイルの保存場所とアジェンダの設定
 (setq org-directory my/org-base-directory)
-(setq org-agenda-files (list (expand-file-name "inbox.org" my/org-base-directory)
-                             (expand-file-name "projects.org" my/org-base-directory)
-                             (expand-file-name "someday.org" my/org-base-directory)))
+
+(defvar my/org-agenda-base-files
+  (list (expand-file-name "inbox.org" my/org-base-directory)
+        (expand-file-name "projects.org" my/org-base-directory)
+        (expand-file-name "someday.org" my/org-base-directory))
+  "Base files always included in the agenda.")
+
+(setq org-agenda-files my/org-agenda-base-files)
+
+(defun my/org-agenda-add-daily-file ()
+  "Add the daily log file for the agenda date, if it exists."
+  (let* ((base my/org-base-directory)
+         (date (or (and (boundp 'org-agenda-current-date)
+                        org-agenda-current-date)
+                   (calendar-current-date)))
+         (month (nth 0 date))
+         (day (nth 1 date))
+         (year (nth 2 date))
+         (daily (expand-file-name
+                 (format "daily/%04d/%02d/%04d-%02d-%02d.org"
+                         year month year month day)
+                 base)))
+    (setq org-agenda-files
+          (delete-dups
+           (append my/org-agenda-base-files
+                   (when (file-exists-p daily)
+                     (list daily)))))))
+
+(add-hook 'org-agenda-prepare-hook #'my/org-agenda-add-daily-file)
 
 ;;(setq org-default-notes-file (concat org-directory "/home.org"))
+
+;; Agenda: show subtask context under top-level projects.org headings.
+(defun my/org-agenda-project-subpath ()
+  "Return indent and parent-path under top-level projects.org headings."
+  (let ((marker (or (org-get-at-bol 'org-hd-marker)
+                    (org-get-at-bol 'org-marker))))
+    (if (not marker)
+        ""
+      (with-current-buffer (marker-buffer marker)
+        (save-excursion
+          (goto-char marker)
+          (let ((file (buffer-file-name)))
+            (if (not (and file
+                          (string-equal (file-truename file)
+                                        (file-truename (expand-file-name "projects.org" my/org-base-directory)))))
+                ""
+              (let* ((level (org-outline-level))
+                     (indent (make-string (* 2 (max 0 (1- level))) ?\s))
+                     (path (org-get-outline-path nil t)) ;; parents only
+                     (subpath (cdr path))
+                     (label (if (and subpath (car subpath))
+                                (concat (string-join subpath " > ") " / ")
+                              "")))
+                (concat indent label)))))))))
+
+(setq org-agenda-prefix-format
+      '((agenda . "  %?-12t% s")
+        (todo . " %i %-12:c %(my/org-agenda-project-subpath)")
+        (tags . " %i %-12:c %(my/org-agenda-project-subpath)")
+        (search . " %i %-12:c %(my/org-agenda-project-subpath)")))
 
 ;;Journal
 ;;(defun my/org-journal-file ()
@@ -287,6 +356,31 @@ capture の挿入位置として返す。
 )
 
 (global-set-key (kbd "C-c n d") #'my/open-today-daily-log)
+
+(defun my/org-archive-done-to-task-archive ()
+  "Archive DONE tasks in the current buffer to archives/task.org."
+  (interactive)
+  (let* ((archive-file (expand-file-name "archives/task.org" my/org-base-directory))
+         (org-archive-location (concat archive-file "::"))
+         (positions nil))
+    (org-map-entries
+     (lambda () (push (point-marker) positions))
+     "TODO=\"DONE\""
+     'file)
+    (if (null positions)
+        (message "No DONE tasks to archive.")
+      (setq positions
+            (sort positions
+                  (lambda (a b)
+                    (> (marker-position a) (marker-position b)))))
+      (dolist (m positions)
+        (when (marker-buffer m)
+          (with-current-buffer (marker-buffer m)
+            (goto-char m)
+            (org-archive-subtree))))
+      (message "Archived %d DONE task(s)." (length positions)))))
+
+(global-set-key (kbd "C-c n a") #'my/org-archive-done-to-task-archive)
 
 ;; org captureのショートカット設定
 (setq org-capture-templates
