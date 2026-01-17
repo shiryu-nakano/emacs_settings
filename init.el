@@ -30,7 +30,7 @@
 (ensure-package-installed 'ox-hugo)
 (ensure-package-installed 'evil)
 (ensure-package-installed 'key-chord)
-(ensure-package-installed 'atom-one-dark-theme)
+;;(ensure-package-installed 'atom-one-dark-theme)
 
 (require 'ox-hugo)
 
@@ -38,7 +38,7 @@
 ;; =======================================================================
 ;; §2. Emacsの基本設定
 ;; -----------------------------------------------------------------------
-;; Emacs全体の基本的な外観や挙動を設定します。
+;; Emacs全体の基本的な外観や挙動を設定
 ;; =======================================================================
 
 (setq inhibit-startup-message t)    ;; 起動メッセージを非表示に
@@ -47,11 +47,13 @@
 (global-display-line-numbers-mode t) ;; 行番号を常に表示
 
 ;; 便利なキーバインド設定
+;;;; init.elを一発で開く
 (global-set-key (kbd "C-c e i")
-                (lambda () (interactive) (find-file user-init-file)))  ;; init.elを一発で開く
+                (lambda () (interactive) (find-file user-init-file)))  
+;;;; projects.orgを一発で開く
 (global-set-key (kbd "C-c e p")
                 (lambda () (interactive)
-                  (find-file (expand-file-name "projects.org" my/org-base-directory))))  ;; projects.orgを一発で開く
+                  (find-file (expand-file-name "projects.org" my/org-base-directory))))  
 
 ;; デバッグ用
 (setq debug-on-error t)
@@ -63,8 +65,9 @@
 ;; Vimのようなモーダル編集を可能にします。
 ;; =======================================================================
 
+;; Evilモードを有効化
 (when (require 'evil nil 'noerror)
-  (evil-mode 1)) ;; Evilモードを有効化
+  (evil-mode 1))
 
 ;; "jj"でインサートモードからノーマルモードへ移行
 (when (require 'key-chord nil 'noerror))
@@ -99,11 +102,6 @@
         '((:auto-map my/org-super-agenda-project-top-level)
           (:auto-parent t))))
 
-
-;; org-bullets: 見出しの * を丸いアイコンにしてくれる
-;;(use-package org-bullets
-;;  :ensure t
-;;  :hook (org-mode . org-bullets-mode))
 
 
 (setq system-time-locale "C") ;; 英語表記にする（December など）
