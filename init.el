@@ -253,10 +253,50 @@
           ""))
     ""))
 
-(defun my/org-daily-log-target ()
-  "日次ログ用ファイル ~/org/daily/YYYY/MM/YYYY-MM-DD.org の
-* inbox 見出しの末尾を capture の挿入位置として返す。
-新規ファイル作成時は前日のファイルから Home, 直近の予定締め切り, TASK, TASK整理, Agile, inbox をコピーする。"
+(defun my/org-daily-log-section (section-name)
+  "Return the end-of-line position of SECTION-NAME in today's daily log file.
+If SECTION-NAME doesn't exist, create it at the end of the file."
+  (let* ((base-dir (expand-file-name "daily" org-directory))
+         (rel-path (format-time-string "%Y/%m/%Y-%m-%d.org"))
+         (file     (expand-file-name rel-path base-dir)))
+    ;; ファイルを開く（存在しない場合は my/org-daily-log-target で作成されている前提）
+    (set-buffer (find-file-noselect file))
+    (goto-char (point-min))
+    (if (re-search-forward (concat "^\\* " (regexp-quote section-name) "\\b") nil t)
+        (progn
+          (end-of-line)  ;; section-name 行の終わりへ
+          (current-buffer))
+      ;; section が見つからない場合：最後に作成
+      (goto-char (point-max))
+      (unless (bolp) (insert "\n"))
+      (insert (concat "* " section-name "\n"))
+      (current-buffer))))
+
+
+(defun my/org-pick-project-tag ()
+  "projects.org の最上位見出しからプロジェクト名を拾い、タグ文字列を返す。空入力ならタグなし。"
+  (let* ((projects-file (expand-file-name "projects.org" org-directory))
+         (cands
+          (when (file-exists-p projects-file)
+            (with-current-buffer (find-file-noselect projects-file)
+              (org-mode)
+              (org-map-entries
+               (lambda ()
+                 ;; レベル1見出しのタイトルを取り出す
+                 (nth 4 (org-heading-components)))
+               "LEVEL=1"))))
+         (cands (delete-dups (delq nil cands)))
+         (choice (completing-read
+                  "Project tag (空ならなし): "
+                  cands nil t nil nil "")))
+    (if (string= choice "")
+        ""                              ; タグなし
+      (format " :%s:" (upcase choice))))) ; 例: :arcanain2025:
+
+
+(defun my/open-today-daily-log-impl ()
+  "Ensure today's daily log file exists with all sections initialized.
+Returns the buffer (for compatibility with capture)."
   (let* ((base-dir (expand-file-name "daily" org-directory))
          (rel-path (format-time-string "%Y/%m/%Y-%m-%d.org"))
          (file     (expand-file-name rel-path base-dir))
@@ -308,40 +348,7 @@
         (if (string-empty-p inbox-content)
             (insert "* inbox\n\n")
           (insert inbox-content "\n"))))
-    ;; * inbox を探して、その行の終わりへ位置づけ（子見出しを追加可能に）
-    (goto-char (point-min))
-    (if (re-search-forward "^\\* inbox\\b" nil t)
-        (progn
-          (end-of-line)  ;; * inbox 行の終わりへ
-          (current-buffer))
-      ;; inbox が見つからない場合の保険
-      (goto-char (point-max))
-      (unless (bolp) (insert "\n"))
-      (insert "* inbox\n")
-      (current-buffer))))
-
-
-(defun my/org-pick-project-tag ()
-  "projects.org の最上位見出しからプロジェクト名を拾い、タグ文字列を返す。空入力ならタグなし。"
-  (let* ((projects-file (expand-file-name "projects.org" org-directory))
-         (cands
-          (when (file-exists-p projects-file)
-            (with-current-buffer (find-file-noselect projects-file)
-              (org-mode)
-              (org-map-entries
-               (lambda ()
-                 ;; レベル1見出しのタイトルを取り出す
-                 (nth 4 (org-heading-components)))
-               "LEVEL=1"))))
-         (cands (delete-dups (delq nil cands)))
-         (choice (completing-read
-                  "Project tag (空ならなし): "
-                  cands nil t nil nil "")))
-    (if (string= choice "")
-        ""                              ; タグなし
-      (format " :%s:" (upcase choice))))) ; 例: :arcanain2025:
-
-
+    (current-buffer)))
 (defun my/open-today-daily-log ()
   "今日の日次ログファイルを一発で開く。
 必要ならファイルと見出しを作成する。"
@@ -353,8 +360,7 @@
     ;; LOGの位置に飛びたいなら：
     (goto-char (point-min))
     (when (re-search-forward "^\\* LOG\\b" nil t)
-      (forward-line 1)))
-)
+      (forward-line 1))))
 
 (global-set-key (kbd "C-c n d") #'my/open-today-daily-log)
 
@@ -388,15 +394,12 @@
       `(
         ;; Inbox (captured in today's daily log file inbox section)
         ("i" "Inbox task" entry
-         (function my/org-daily-log-target)
+         (function (lambda () (my/org-daily-log-section "inbox")))
          "** INBOX %?")
 
 	;; Daily log （日時ログ）
-        ;;("j" "Daily Log" plain
-        ;; (function my/org-daily-log-target)
-        ;;"** %<%H:%M>\n%?")
 	("j" "Daily Log" plain
-         (function my/org-daily-log-target)
+         (function (lambda () (my/org-daily-log-section "LOG")))
          "** %<%Y-%m-%d %H:%M> %(my/org-pick-project-tag)\n%?")
 
 	;; knowledge
@@ -409,12 +412,11 @@
 	 (file (lambda () (expand-file-name "temp.org" my/org-base-directory)))
 	 "* %?\n  Created on %U")
 
-	;;temp
+	;;research idea
 	("r" "research idea" entry
 	 (file (lambda () (expand-file-name "idea.org" my/org-base-directory)))
 	 "* %?\n  Created on %U")
-	)
-      )
+	))
 
 
 ;; Refile 設定（inbox から projects / someday に送る）
