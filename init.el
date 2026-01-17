@@ -254,17 +254,15 @@
     ""))
 
 (defun my/org-daily-log-section (section-name)
-  "Return the end-of-line position of SECTION-NAME in today's daily log file.
+  "Return the end-of-subtree position of SECTION-NAME in today's daily log file.
 If SECTION-NAME doesn't exist, create it at the end of the file."
-  (let* ((base-dir (expand-file-name "daily" org-directory))
-         (rel-path (format-time-string "%Y/%m/%Y-%m-%d.org"))
-         (file     (expand-file-name rel-path base-dir)))
-    ;; ファイルを開く（存在しない場合は my/org-daily-log-target で作成されている前提）
-    (set-buffer (find-file-noselect file))
+  (let* ((buf (my/open-today-daily-log-impl)))
+    (set-buffer buf)
     (goto-char (point-min))
     (if (re-search-forward (concat "^\\* " (regexp-quote section-name) "\\b") nil t)
         (progn
-          (end-of-line)  ;; section-name 行の終わりへ
+          (org-end-of-subtree t t)  ;; section-name のサブツリー終わりへ
+          (unless (bolp) (insert "\n"))
           (current-buffer))
       ;; section が見つからない場合：最後に作成
       (goto-char (point-max))
@@ -293,6 +291,16 @@ If SECTION-NAME doesn't exist, create it at the end of the file."
         ""                              ; タグなし
       (format " :%s:" (upcase choice))))) ; 例: :arcanain2025:
 
+(defun my/org-daily-log-file ()
+  "Ensure today's daily log exists and return its file path."
+  (let ((buf (my/open-today-daily-log-impl)))
+    (buffer-file-name buf)))
+
+(defun my/org-capture-inbox-target ()
+  "Ensure today's daily log exists and return the inbox target buffer."
+  (my/open-today-daily-log-impl)
+  (my/org-daily-log-section "inbox"))
+
 
 (defun my/open-today-daily-log-impl ()
   "Ensure today's daily log file exists with all sections initialized.
@@ -300,18 +308,18 @@ Returns the buffer (for compatibility with capture)."
   (let* ((base-dir (expand-file-name "daily" org-directory))
          (rel-path (format-time-string "%Y/%m/%Y-%m-%d.org"))
          (file     (expand-file-name rel-path base-dir))
-         (new-file (not (file-exists-p file))))
+         (new-file (not (file-exists-p file)))
+         (yesterday (time-subtract (current-time) (days-to-time 1)))
+         (yesterday-rel-path (format-time-string "%Y/%m/%Y-%m-%d.org" yesterday))
+         (yesterday-file (expand-file-name yesterday-rel-path base-dir)))
     ;; ディレクトリがなければ作成
     (make-directory (file-name-directory file) t)
     ;; ファイルを開く
     (set-buffer (find-file-noselect file))
     ;; 新規ファイルならヘッダと骨組みを挿入
     (when new-file
-      ;; 前日のファイルパスを計算（月またぎに対応）
-      (let* ((yesterday (time-subtract (current-time) (days-to-time 1)))
-             (yesterday-rel-path (format-time-string "%Y/%m/%Y-%m-%d.org" yesterday))
-             (yesterday-file (expand-file-name yesterday-rel-path base-dir))
-             ;; 前日のファイルから各セクションを取得
+      ;; 前日のファイルから各セクションを取得
+      (let* (;; 前日のファイルから各セクションを取得
              (home-content (my/get-section-content-from-file yesterday-file "Home"))
              (deadline-content (my/get-section-content-from-file yesterday-file "直近の予定締め切り"))
              (task-content (my/get-section-content-from-file yesterday-file "TASK"))
@@ -348,13 +356,22 @@ Returns the buffer (for compatibility with capture)."
         (if (string-empty-p inbox-content)
             (insert "* inbox\n\n")
           (insert inbox-content "\n"))))
+    (unless (save-excursion
+              (goto-char (point-min))
+              (re-search-forward "^\\* inbox\\b" nil t))
+      (let ((inbox-content (my/get-section-content-from-file yesterday-file "inbox")))
+        (goto-char (point-max))
+        (unless (bolp) (insert "\n"))
+        (if (string-empty-p inbox-content)
+            (insert "* inbox\n\n")
+          (insert inbox-content "\n"))))
     (current-buffer)))
 (defun my/open-today-daily-log ()
   "今日の日次ログファイルを一発で開く。
 必要ならファイルと見出しを作成する。"
   (interactive)
-  ;; my/org-daily-log-target はバッファを返すので、それを switch-to-buffer で表示
-  (let ((buf (my/org-daily-log-target)))
+  ;; my/open-today-daily-log-impl はバッファを返すので、それを switch-to-buffer で表示
+  (let ((buf (my/open-today-daily-log-impl)))
     (switch-to-buffer buf)
     ;; 好みで位置を調整：LOGの先頭 or ファイル先頭など
     ;; LOGの位置に飛びたいなら：
@@ -393,8 +410,8 @@ Returns the buffer (for compatibility with capture)."
 (setq org-capture-templates
       `(
         ;; Inbox (captured in today's daily log file inbox section)
-        ("i" "Inbox task" entry
-         (function (lambda () (my/org-daily-log-section "inbox")))
+        ("i" "Inbox task" plain
+         (function my/org-capture-inbox-target)
          "** INBOX %?")
 
 	;; Daily log （日時ログ）
