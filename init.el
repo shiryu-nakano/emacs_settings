@@ -169,12 +169,13 @@
   (list (expand-file-name "inbox.org" my/org-base-directory)
         (expand-file-name "projects.org" my/org-base-directory)
         (expand-file-name "someday.org" my/org-base-directory))
-  "Base files always included in the agenda.")
+  "Base files always included in the agenda (not used for daily view).")
 
-(setq org-agenda-files my/org-agenda-base-files)
+;; Agenda uses only today's daily log file
+(setq org-agenda-files '())
 
 (defun my/org-agenda-add-daily-file ()
-  "Add the daily log file for the agenda date, if it exists."
+  "Set agenda to show only today's daily log file."
   (let* ((base my/org-base-directory)
          (date (or (and (boundp 'org-agenda-current-date)
                         org-agenda-current-date)
@@ -186,11 +187,11 @@
                  (format "daily/%04d/%02d/%04d-%02d-%02d.org"
                          year month year month day)
                  base)))
+    ;; Only today's daily file
     (setq org-agenda-files
-          (delete-dups
-           (append my/org-agenda-base-files
-                   (when (file-exists-p daily)
-                     (list daily)))))))
+          (if (file-exists-p daily)
+              (list daily)
+            '()))))
 
 (add-hook 'org-agenda-prepare-hook #'my/org-agenda-add-daily-file)
 
@@ -254,9 +255,8 @@
 
 (defun my/org-daily-log-target ()
   "日次ログ用ファイル ~/org/daily/YYYY/MM/YYYY-MM-DD.org の
-* LOG 見出しの末尾（子見出しと本文を含むサブツリーの終わり）を
-capture の挿入位置として返す。
-新規ファイル作成時は前日のファイルから Home, 直近の予定締め切り, TASK, TASK整理, Agile をコピーする。"
+* inbox 見出しの末尾を capture の挿入位置として返す。
+新規ファイル作成時は前日のファイルから Home, 直近の予定締め切り, TASK, TASK整理, Agile, inbox をコピーする。"
   (let* ((base-dir (expand-file-name "daily" org-directory))
          (rel-path (format-time-string "%Y/%m/%Y-%m-%d.org"))
          (file     (expand-file-name rel-path base-dir))
@@ -276,9 +276,10 @@ capture の挿入位置として返す。
              (deadline-content (my/get-section-content-from-file yesterday-file "直近の予定締め切り"))
              (task-content (my/get-section-content-from-file yesterday-file "TASK"))
              (task-organize-content (my/get-section-content-from-file yesterday-file "タスク整理"))
-             (agile-content (my/get-section-content-from-file yesterday-file "Agile")))
+             (agile-content (my/get-section-content-from-file yesterday-file "Agile"))
+             (inbox-content (my/get-section-content-from-file yesterday-file "inbox")))
         (erase-buffer)
-        (insert (format "#+title: %s\n#+filetags: :daily:\n\n"
+        (insert (format "#+title: %s\n#+filetags: :daily:\n#+OPTIONS: toc:nil num:nil ^:nil tags:nil todo:nil H:10\n#+OPTIONS: broken-links:mark\n#+OPTIONS: tex:t\n#+OPTIONS: html-postamble:nil\n#+OPTIONS: links:nil\n\n"
                         (format-time-string "%Y-%m-%d")))
         ;; 前日からコピーするか、空のセクションを作成
         (if (string-empty-p home-content)
@@ -303,18 +304,20 @@ capture の挿入位置として返す。
               (insert "** 海外研究\n\n")
               (insert "** 音楽\n\n"))
           (insert agile-content "\n"))
-        (insert "* 所感\n\n")))
-    ;; * LOG を探して、そのサブツリーの末尾へ
+        (insert "* 所感\n\n")
+        (if (string-empty-p inbox-content)
+            (insert "* inbox\n\n")
+          (insert inbox-content "\n"))))
+    ;; * inbox を探して、その行の終わりへ位置づけ（子見出しを追加可能に）
     (goto-char (point-min))
-    (if (re-search-forward "^\\* LOG\\b" nil t)
+    (if (re-search-forward "^\\* inbox\\b" nil t)
         (progn
-          (org-end-of-subtree t t)  ;; LOG のサブツリー（子＋本文）終わりへ
-          (unless (bolp) (insert "\n"))
+          (end-of-line)  ;; * inbox 行の終わりへ
           (current-buffer))
-      ;; LOG が見つからない場合の保険
+      ;; inbox が見つからない場合の保険
       (goto-char (point-max))
       (unless (bolp) (insert "\n"))
-      (insert "* LOG\n")
+      (insert "* inbox\n")
       (current-buffer))))
 
 
@@ -383,10 +386,10 @@ capture の挿入位置として返す。
 ;; org captureのショートカット設定
 (setq org-capture-templates
       `(
-        ;; Inbox
+        ;; Inbox (captured in today's daily log file inbox section)
         ("i" "Inbox task" entry
-         (file (lambda () (expand-file-name "inbox.org" my/org-base-directory)))
-         "* INBOX %?\n  Created on %U")
+         (function my/org-daily-log-target)
+         "** INBOX %?")
 
 	;; Daily log （日時ログ）
         ;;("j" "Daily Log" plain
