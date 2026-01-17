@@ -30,6 +30,7 @@
 (ensure-package-installed 'ox-hugo)
 (ensure-package-installed 'evil)
 (ensure-package-installed 'key-chord)
+(ensure-package-installed 'atom-one-dark-theme)
 
 (require 'ox-hugo)
 
@@ -42,11 +43,15 @@
 
 (setq inhibit-startup-message t)    ;; 起動メッセージを非表示に
 ;;(load-theme 'material t)            ;; `material`テーマを読み込み
+(load-theme 'tango-dark t)
 (global-display-line-numbers-mode t) ;; 行番号を常に表示
 
 ;; 便利なキーバインド設定
 (global-set-key (kbd "C-c e i")
                 (lambda () (interactive) (find-file user-init-file)))  ;; init.elを一発で開く
+(global-set-key (kbd "C-c e p")
+                (lambda () (interactive)
+                  (find-file (expand-file-name "projects.org" my/org-base-directory))))  ;; projects.orgを一発で開く
 
 ;; デバッグ用
 (setq debug-on-error t)
@@ -54,7 +59,7 @@
 
 ;; =======================================================================
 ;; §3. Evil (Vimキーバインド) の設定
-;; -----------------------------------------------------------------------
+;; -----
 ;; Vimのようなモーダル編集を可能にします。
 ;; =======================================================================
 
@@ -76,10 +81,23 @@
 (use-package org-super-agenda
   :ensure t
   :config
-  (org-super-agenda-mode))
-
-(setq org-super-agenda-groups
-      '((:auto-parent t)))  ;; 親見出しごとに自動グループ化
+  (org-super-agenda-mode)
+  (defun my/org-super-agenda-project-top-level (item)
+    "Return top-level heading for ITEM only in projects.org."
+    (let ((marker (org-super-agenda--get-marker item)))
+      (when marker
+        (org-super-agenda--when-with-marker-buffer marker
+          (let ((file (buffer-file-name)))
+            (when (and file
+                       (string-equal (file-truename file)
+                                     (file-truename (expand-file-name "projects.org" my/org-base-directory))))
+              (org-back-to-heading t)
+              (while (> (org-outline-level) 1)
+                (org-up-heading-safe))
+              (org-get-heading t t t t)))))))
+  (setq org-super-agenda-groups
+        '((:auto-map my/org-super-agenda-project-top-level)
+          (:auto-parent t))))
 
 
 ;; org-bullets: 見出しの * を丸いアイコンにしてくれる
@@ -148,11 +166,67 @@
 
 ;; Orgファイルの保存場所とアジェンダの設定
 (setq org-directory my/org-base-directory)
-(setq org-agenda-files (list (expand-file-name "inbox.org" my/org-base-directory)
-                             (expand-file-name "projects.org" my/org-base-directory)
-                             (expand-file-name "someday.org" my/org-base-directory)))
+
+(defvar my/org-agenda-base-files
+  (list (expand-file-name "inbox.org" my/org-base-directory)
+        (expand-file-name "projects.org" my/org-base-directory)
+        (expand-file-name "someday.org" my/org-base-directory))
+  "Base files always included in the agenda.")
+
+(setq org-agenda-files my/org-agenda-base-files)
+
+(defun my/org-agenda-add-daily-file ()
+  "Add the daily log file for the agenda date, if it exists."
+  (let* ((base my/org-base-directory)
+         (date (or (and (boundp 'org-agenda-current-date)
+                        org-agenda-current-date)
+                   (calendar-current-date)))
+         (month (nth 0 date))
+         (day (nth 1 date))
+         (year (nth 2 date))
+         (daily (expand-file-name
+                 (format "daily/%04d/%02d/%04d-%02d-%02d.org"
+                         year month year month day)
+                 base)))
+    (setq org-agenda-files
+          (delete-dups
+           (append my/org-agenda-base-files
+                   (when (file-exists-p daily)
+                     (list daily)))))))
+
+(add-hook 'org-agenda-prepare-hook #'my/org-agenda-add-daily-file)
 
 ;;(setq org-default-notes-file (concat org-directory "/home.org"))
+
+;; Agenda: show subtask context under top-level projects.org headings.
+(defun my/org-agenda-project-subpath ()
+  "Return indent and parent-path under top-level projects.org headings."
+  (let ((marker (or (org-get-at-bol 'org-hd-marker)
+                    (org-get-at-bol 'org-marker))))
+    (if (not marker)
+        ""
+      (with-current-buffer (marker-buffer marker)
+        (save-excursion
+          (goto-char marker)
+          (let ((file (buffer-file-name)))
+            (if (not (and file
+                          (string-equal (file-truename file)
+                                        (file-truename (expand-file-name "projects.org" my/org-base-directory)))))
+                ""
+              (let* ((level (org-outline-level))
+                     (indent (make-string (* 2 (max 0 (1- level))) ?\s))
+                     (path (org-get-outline-path nil t)) ;; parents only
+                     (subpath (cdr path))
+                     (label (if (and subpath (car subpath))
+                                (concat (string-join subpath " > ") " / ")
+                              "")))
+                (concat indent label)))))))))
+
+(setq org-agenda-prefix-format
+      '((agenda . "  %?-12t% s")
+        (todo . " %i %-12:c %(my/org-agenda-project-subpath)")
+        (tags . " %i %-12:c %(my/org-agenda-project-subpath)")
+        (search . " %i %-12:c %(my/org-agenda-project-subpath)")))
 
 ;;Journal
 ;;(defun my/org-journal-file ()
@@ -162,14 +236,29 @@
 ;;   "~/org"))
 
 
-
-
-
 ;;日時ログ用のヘルパー関数
+
+;; 前日のファイルから指定セクションの内容を取得
+(defun my/get-section-content-from-file (file section-name)
+  "FILE から SECTION-NAME 見出しの内容（サブツリー全体）を返す。
+見出しが存在しない場合は空文字列を返す。"
+  (if (file-exists-p file)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (delay-mode-hooks (org-mode))
+        (goto-char (point-min))
+        (if (re-search-forward (concat "^\\* " (regexp-quote section-name) "\\b") nil t)
+            (let ((start (line-beginning-position)))
+              (org-end-of-subtree t t)
+              (buffer-substring-no-properties start (point)))
+          ""))
+    ""))
+
 (defun my/org-daily-log-target ()
   "日次ログ用ファイル ~/org/daily/YYYY/MM/YYYY-MM-DD.org の
 * LOG 見出しの末尾（子見出しと本文を含むサブツリーの終わり）を
-capture の挿入位置として返す。"
+capture の挿入位置として返す。
+新規ファイル作成時は前日のファイルから Home, 直近の予定締め切り, TASK, TASK整理, Agile をコピーする。"
   (let* ((base-dir (expand-file-name "daily" org-directory))
          (rel-path (format-time-string "%Y/%m/%Y-%m-%d.org"))
          (file     (expand-file-name rel-path base-dir))
@@ -180,14 +269,43 @@ capture の挿入位置として返す。"
     (set-buffer (find-file-noselect file))
     ;; 新規ファイルならヘッダと骨組みを挿入
     (when new-file
-      (erase-buffer)
-      (insert (format "#+title: %s\n#+filetags: :daily:\n\n"
-                      (format-time-string "%Y-%m-%d")))
-      (insert "* 直近の予定締め切り\n\n")
-      (insert "* TASK\n\n")
-      (insert "* LOG\n\n")
-      (insert "* タスク整理\n\n")
-      (insert "* 所感\n\n"))
+      ;; 前日のファイルパスを計算（月またぎに対応）
+      (let* ((yesterday (time-subtract (current-time) (days-to-time 1)))
+             (yesterday-rel-path (format-time-string "%Y/%m/%Y-%m-%d.org" yesterday))
+             (yesterday-file (expand-file-name yesterday-rel-path base-dir))
+             ;; 前日のファイルから各セクションを取得
+             (home-content (my/get-section-content-from-file yesterday-file "Home"))
+             (deadline-content (my/get-section-content-from-file yesterday-file "直近の予定締め切り"))
+             (task-content (my/get-section-content-from-file yesterday-file "TASK"))
+             (task-organize-content (my/get-section-content-from-file yesterday-file "タスク整理"))
+             (agile-content (my/get-section-content-from-file yesterday-file "Agile")))
+        (erase-buffer)
+        (insert (format "#+title: %s\n#+filetags: :daily:\n\n"
+                        (format-time-string "%Y-%m-%d")))
+        ;; 前日からコピーするか、空のセクションを作成
+        (if (string-empty-p home-content)
+            (insert "* Home\n\n")
+          (insert home-content "\n"))
+        (if (string-empty-p deadline-content)
+            (insert "* 直近の予定締め切り\n\n")
+          (insert deadline-content "\n"))
+        (if (string-empty-p task-content)
+            (insert "* TASK\n\n")
+          (insert task-content "\n"))
+        (insert "* LOG\n\n")
+        (if (string-empty-p task-organize-content)
+            (insert "* タスク整理\n\n")
+          (insert task-organize-content "\n"))
+        (if (string-empty-p agile-content)
+            (progn
+              (insert "* Agile\n")
+              (insert "** Engineer\n\n")
+              (insert "** Study\n\n")
+              (insert "** 研究\n\n")
+              (insert "** 海外研究\n\n")
+              (insert "** 音楽\n\n"))
+          (insert agile-content "\n"))
+        (insert "* 所感\n\n")))
     ;; * LOG を探して、そのサブツリーの末尾へ
     (goto-char (point-min))
     (if (re-search-forward "^\\* LOG\\b" nil t)
@@ -223,7 +341,6 @@ capture の挿入位置として返す。"
       (format " :%s:" (upcase choice))))) ; 例: :arcanain2025:
 
 
-
 (defun my/open-today-daily-log ()
   "今日の日次ログファイルを一発で開く。
 必要ならファイルと見出しを作成する。"
@@ -237,9 +354,33 @@ capture の挿入位置として返す。"
     (when (re-search-forward "^\\* LOG\\b" nil t)
       (forward-line 1)))
 )
+
 (global-set-key (kbd "C-c n d") #'my/open-today-daily-log)
 
+(defun my/org-archive-done-to-task-archive ()
+  "Archive DONE tasks in the current buffer to archives/task.org."
+  (interactive)
+  (let* ((archive-file (expand-file-name "archives/task.org" my/org-base-directory))
+         (org-archive-location (concat archive-file "::"))
+         (positions nil))
+    (org-map-entries
+     (lambda () (push (point-marker) positions))
+     "TODO=\"DONE\""
+     'file)
+    (if (null positions)
+        (message "No DONE tasks to archive.")
+      (setq positions
+            (sort positions
+                  (lambda (a b)
+                    (> (marker-position a) (marker-position b)))))
+      (dolist (m positions)
+        (when (marker-buffer m)
+          (with-current-buffer (marker-buffer m)
+            (goto-char m)
+            (org-archive-subtree))))
+      (message "Archived %d DONE task(s)." (length positions)))))
 
+(global-set-key (kbd "C-c n a") #'my/org-archive-done-to-task-archive)
 
 ;; org captureのショートカット設定
 (setq org-capture-templates
@@ -281,6 +422,7 @@ capture の挿入位置として返す。"
         (,(expand-file-name "someday.org" my/org-base-directory)  :maxlevel . 1)
 	(,(expand-file-name "tips.org" my/org-base-directory)  :maxlevel . 1)
 	(,(expand-file-name "papers.org" my/org-base-directory)  :maxlevel . 1)
+	(,(expand-file-name "archive.org" my/org-base-directory)  :maxlevel . 1)
 	))
 
 (setq org-outline-path-complete-in-steps nil) ; 一発でパス補完
@@ -295,17 +437,19 @@ capture の挿入位置として返す。"
       '((sequence
          "INBOX(i)"   ; 未整理
          "NEXT(n)"    ; 次にとるべき行動
+         "WIP(c)"     ; 作業中
          "WAIT(w)"    ; 待ち状態
          "HOLD(h)"    ; 保留
          "|"
          "DONE(d)"    ; 完了
-         "CANCEL(c)"  ; 中止
+         "CANCEL(x)"  ; 中止
          )))
 
 ;; 見た目上わかりやすく
 (setq org-todo-keyword-faces
       '(("INBOX" . "orange")
         ("NEXT"  . "cyan")
+        ("WIP"   . "deep sky blue")
         ("WAIT"  . "yellow")
         ("HOLD"  . "magenta")
         ("CANCEL" . "grey")))
@@ -313,11 +457,11 @@ capture の挿入位置として返す。"
 
 (setq org-agenda-custom-commands
        '(("n" "Next Actions"
-         ((todo "NEXT")))
+         ((todo "NEXT|WIP")))
         ("w" "Waiting"
-         ((todo "WAIT")))
+         ((todo "WAIT|WIP")))
         ("h" "On Hold"
-         ((todo "HOLD")))))
+         ((todo "HOLD|WIP")))))
 
 
 
@@ -373,10 +517,6 @@ capture の挿入位置として返す。"
 ;;         "* 直近の予定締め切り\n\n\n* TASK\n\n* LOG\n** %<%H:%M>\n%?\n\n* タスク整理\n\n* 所感\n"
 ;;         :target (file+head "%<%Y/%m/%Y-%m-%d>.org"
 ;;                            "#+title: %<%Y-%m-%d>\n#+filetags: :daily:\n\n"))))
-
-
-
-
 
 
 ;; ====== 練習用↑
@@ -460,7 +600,7 @@ capture の挿入位置として返す。"
  ;; If there is more than one, they won't work right.
  '(custom-enabled-themes '(tango-dark))
  '(package-selected-packages
-   '(org-super-agenda org-bullets ox-hugo py-autopep8 material-theme magit key-chord flycheck evil elpy ein dap-mode blacken better-defaults)))
+   '(atom-one-dark-theme org-super-agenda org-bullets ox-hugo py-autopep8 material-theme magit key-chord flycheck evil elpy ein dap-mode blacken better-defaults)))
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.
