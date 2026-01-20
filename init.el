@@ -111,7 +111,7 @@
 (require 'org)
 ;; グローバルキーバインドの設定
 ;;(global-set-key (kbd "C-c l") 'org-store-link)
-(global-set-key (kbd "C-c a") 'org-agenda)
+(global-set-key (kbd "C-c a") #'my/org-agenda)
 (global-set-key (kbd "C-c c") 'org-capture)
 
 ;; Orgファイルの保存場所とアジェンダの設定
@@ -172,10 +172,8 @@
   "Base files always included in the agenda (not used for daily view).")
 
 ;; Agenda uses only today's daily log file
-(setq org-agenda-files '())
-
-(defun my/org-agenda-add-daily-file ()
-  "Set agenda to show only today's daily log file."
+(defun my/org-agenda-files-today ()
+  "Return a list with today's daily log file, or an empty list."
   (let* ((base my/org-base-directory)
          (date (or (and (boundp 'org-agenda-current-date)
                         org-agenda-current-date)
@@ -187,13 +185,15 @@
                  (format "daily/%04d/%02d/%04d-%02d-%02d.org"
                          year month year month day)
                  base)))
-    ;; Only today's daily file
-    (setq org-agenda-files
-          (if (file-exists-p daily)
-              (list daily)
-            '()))))
+    (if (file-exists-p daily)
+        (list daily)
+      '())))
 
-(add-hook 'org-agenda-prepare-hook #'my/org-agenda-add-daily-file)
+(defun my/org-agenda ()
+  "Open agenda using only today's daily log file."
+  (interactive)
+  (let ((org-agenda-files (my/org-agenda-files-today)))
+    (call-interactively #'org-agenda)))
 
 ;;(setq org-default-notes-file (concat org-directory "/home.org"))
 
