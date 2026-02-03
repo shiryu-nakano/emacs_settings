@@ -12,6 +12,7 @@
 ;; org-roam 関連の変数は先に定義して未ロード時の参照エラーを防ぐ
 (defvar my/org-base-directory nil)
 (defvar my/org-roam-projects-dir nil)
+(defvar my/org-roam-books-dir nil)
 (defvar my/org-roam-papers-dir nil)
 (defvar my/org-roam-cabinet-dir nil)
 (defvar my/org-roam-weekly-dir nil)
@@ -49,6 +50,7 @@
 (setq my/org-base-directory (file-truename "~/org-roam/"))
 ;; org-roam ディレクトリ構造の設定（先に定義して未ロード時の参照エラーを防ぐ）
 (setq my/org-roam-projects-dir (expand-file-name "projects/" my/org-base-directory))
+(setq my/org-roam-books-dir (expand-file-name "books/" my/org-base-directory))
 (setq my/org-roam-papers-dir (expand-file-name "papers/" my/org-base-directory))
 (setq my/org-roam-cabinet-dir (expand-file-name "cabinet/" my/org-base-directory))
 (setq my/org-roam-weekly-dir (expand-file-name "weekly/" my/org-base-directory))
@@ -83,7 +85,9 @@
   (setq org-capture-templates
         `(("i" "Inbox (org-roam)" entry
            (file ,(expand-file-name "inbox.org" my/org-roam-cabinet-dir))
-           "* INBOX %?\n  Created on %U"))))
+           "* INBOX %?\n"
+           :prepend nil
+           :empty-lines 1))))
 
 ;; =======================================================================
 ;; org-roam 新機能: inbox, 週次ページ, プロジェクト管理
@@ -96,20 +100,26 @@
   ;; inbox機能
   ;; -----------------------------------------------------------------------
   (defun my/org-roam-inbox-open ()
-  "Open or create org-roam inbox file."
-  (interactive)
-  (let ((inbox-file (expand-file-name "inbox.org" my/org-roam-cabinet-dir)))
-    (unless (file-exists-p inbox-file)
-      (make-directory my/org-roam-cabinet-dir t)
-      (with-temp-file inbox-file
-        (insert "#+title: Inbox\n")
-        (insert "#+date: " (format-time-string "[%Y-%m-%d %a]") "\n")
-        (insert "#+filetags: :inbox:\n\n")
-        (insert "* INBOX\n\n")))
-    (find-file inbox-file)))
-)
+    "Open or create org-roam inbox file."
+    (interactive)
+    (let ((inbox-file (expand-file-name "inbox.org" my/org-roam-cabinet-dir)))
+      (unless (file-exists-p inbox-file)
+        (make-directory my/org-roam-cabinet-dir t)
+        (with-temp-file inbox-file
+          (insert "#+title: Inbox\n")
+          (insert "#+date: " (format-time-string "[%Y-%m-%d %a]") "\n")
+          (insert "#+filetags: :inbox:\n\n")
+          (insert "* INBOX\n\n")))
+      (find-file inbox-file)))
 
-(global-set-key (kbd "C-c n i") #'my/org-roam-inbox-open)
+  (defun my/org-roam-inbox-capture ()
+    "Capture to org-roam inbox using org-capture."
+    (interactive)
+    (make-directory my/org-roam-cabinet-dir t)
+    (org-capture nil "i")))
+
+(global-set-key (kbd "C-c n i") #'my/org-roam-inbox-capture)
+(global-set-key (kbd "C-c n o") #'my/org-roam-inbox-open)
 
 ;; -----------------------------------------------------------------------
 ;; 週次ページ作成機能
@@ -216,6 +226,47 @@
                  (match-string 1))))
            project-files))))
 
+(defun my/org-roam-book-get-all-books ()
+  "Get list of all book tags."
+  (let ((book-files (when (file-directory-p my/org-roam-books-dir)
+                      (directory-files my/org-roam-books-dir t "^book_.*\\.org$"))))
+    (delq nil
+          (mapcar
+           (lambda (f)
+             (with-temp-buffer
+               (insert-file-contents f)
+               (goto-char (point-min))
+               (when (re-search-forward "^#\\+filetags: *:book:\\([^:]+\\):" nil t)
+                 (match-string 1))))
+           book-files))))
+
+(defun my/org-roam-book-create (book-name)
+  "Create a new book file in org-roam books directory."
+  (interactive "sBook name: ")
+  (let* ((slug (downcase (replace-regexp-in-string " " "_" book-name)))
+         (tag (downcase (replace-regexp-in-string " " "" book-name)))
+         (projects (my/org-roam-project-get-open-projects))
+         (selected-project (completing-read "Project tag (empty for none): " projects nil t))
+         (project-tag (if (string-empty-p selected-project) "" (concat ":" selected-project ":")))
+         (filename (expand-file-name
+                    (format "book_%s.org" slug)
+                    my/org-roam-books-dir)))
+    (make-directory my/org-roam-books-dir t)
+    (find-file filename)
+    (insert ":PROPERTIES:\n")
+    (insert ":ID:       " (org-id-new) "\n")
+    (insert ":OWNER:    nakano\n")
+    (insert ":END:\n")
+    (insert "#+title: book-" book-name "\n")
+    (insert "#+date: " (format-time-string "[%Y-%m-%d %a]") "\n")
+    (insert "#+filetags: :book:" tag project-tag "\n\n")
+    (insert "* Notes\n\n")
+    (save-buffer)
+    (when (fboundp 'org-roam-db-update-file)
+      (org-roam-db-update-file))))
+
+(global-set-key (kbd "C-c n b") #'my/org-roam-book-create)
+
 (defun my/org-roam-project-toggle-status ()
   "Toggle project status between open and closed in current buffer."
   (interactive)
@@ -318,7 +369,7 @@
 ;;;; projects.orgを一発で開く
 (global-set-key (kbd "C-c e p")
                 (lambda () (interactive)
-                  (find-file (expand-file-name "projects.org" my/org-base-directory))))  
+                  (find-file (expand-file-name "projects.org" my/org-base-directory))))
 
 ;; デバッグ用
 (setq debug-on-error t)
@@ -331,7 +382,7 @@
   (set-frame-parameter nil 'alpha 80)
   (add-to-list 'default-frame-alist '(alpha . 80)))
 
-;; macOSのタイトルバーを完全に非表示
+;; macOSのタイトルバーを完全に非表示 → ウィンドウの大きさと形状がいじれなくなったので流石に中止
 ;;(when (eq system-type 'darwin)
 ;;  (set-frame-parameter nil 'undecorated t)
 ;;  (add-to-list 'default-frame-alist '(undecorated . t)))
@@ -385,7 +436,7 @@
                 tags-list)))
            nodes)))
     ;; リストを挿入
-    (insert "| タイトル | タグ |\n")
+    (insert "| TITLE | TAG |\n")
     (insert "|----------+------|\n")
     (dolist (node (seq-sort-by #'org-roam-node-title #'string< filtered-nodes))
       (insert (format "| [[id:%s][%s]] | %s |\n"
@@ -408,19 +459,7 @@
         (lambda (tag) (member tag node-tags))
         tags)))))
 
-;; よく使う組み合わせのショートカット
-(defun my/org-roam-dsb-papers ()
-  "DSB研究関連の論文を一覧表示"
-  (interactive)
-  (org-roam-node-find
-   nil nil
-   (lambda (node)
-     (let ((tags (org-roam-node-tags node)))
-       (and (member "paper" tags)
-            (member "DSB" tags))))))
-
 (global-set-key (kbd "C-c z m") #'my/org-roam-find-by-multiple-tags)
-(global-set-key (kbd "C-c z d") #'my/org-roam-dsb-papers)
 
 
 
@@ -467,10 +506,6 @@
 (global-set-key (kbd "C-c a") #'my/org-agenda)
 (global-set-key (kbd "C-c c") 'org-capture)
 
-;; Orgファイルの保存場所とアジェンダの設定
-;;(setq org-directory "~/org-files")
-;;(setq org-agenda-files (list org-directory))
-;;(setq org-default-notes-file (concat org-directory "/notes.org"))
 
 ;; インライン画像の幅をファイルの記述に合わせる
 (setq org-image-actual-width nil)
@@ -527,27 +562,18 @@
         (search . " %i %-12:c")))
 
 
-
-
-
-
 ;; TODO 状態（GTD用）
 (setq org-todo-keywords
       '((sequence
          "INBOX(i)"   ; 未整理
          "NEXT(n)"    ; 次にとるべき行動
+         "DONE(d)"    ; 完了
          "WIP(c)"     ; 作業中
          "WAIT(w)"    ; 待ち状態
          "HOLD(h)"    ; 保留
          "|"
-         "DONE(d)"    ; 完了
          "CANCEL(x)"  ; 中止
-         )
-        (sequence
-         "ACTIVE(a)"  ; アクティブなプロジェクト
-         "|"
-         "ARCHIVED(A)") ; アーカイブされたプロジェクト
-        ))
+         )))
 
 ;; 見た目上わかりやすく
 (setq org-todo-keyword-faces
@@ -606,24 +632,7 @@
         ))
 
 
-;; 今日のノートを開くショートカット
-;;(global-set-key (kbd "C-c n d") #'org-roam-dailies-capture-today)
-;;(use-package org-roam
-;;  :ensure t
-;;  :custom
-;; (org-roam-directory "~/org/roam")
-;; :config
-;;  (org-roam-db-autosync-mode))
-;;(setq org-roam-dailies-directory "daily/")
-;;
-;;(setq org-roam-dailies-capture-templates
-;;      '(("d" "default" entry
-;;         "* 直近の予定締め切り\n\n\n* TASK\n\n* LOG\n** %<%H:%M>\n%?\n\n* タスク整理\n\n* 所感\n"
-;;         :target (file+head "%<%Y/%m/%Y-%m-%d>.org"
-;;                            "#+title: %<%Y-%m-%d>\n#+filetags: :daily:\n\n"))))
 
-
-;; ====== 練習用↑
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
