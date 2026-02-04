@@ -46,8 +46,17 @@
 
 (require 'ox-hugo)
 
-;; 参照用ディレクトリのベースを先に定義
-(setq my/org-base-directory (file-truename "~/org-roam/"))
+;; 参照用ディレクトリのベースを先に定義（OS別に自動切り替え）
+(setq my/org-base-directory
+      (file-truename
+       (cond
+        ((eq system-type 'windows-nt)
+         "C:/Users/NakanoShiryu/Documents/CABiNET/org-roam/")
+        ((eq system-type 'darwin)
+         "~/org-roam/")
+        (t
+         "~/org-roam/"))))
+
 ;; org-roam ディレクトリ構造の設定（先に定義して未ロード時の参照エラーを防ぐ）
 (setq my/org-roam-projects-dir (expand-file-name "projects/" my/org-base-directory))
 (setq my/org-roam-books-dir (expand-file-name "books/" my/org-base-directory))
@@ -60,7 +69,7 @@
   :ensure t
   :demand t
   :custom
-  (org-roam-directory (file-truename "~/org-roam/"))
+  (org-roam-directory my/org-base-directory)
   :bind (("C-c z l" . org-roam-buffer-toggle)
          ("C-c z f" . org-roam-node-find)
          ("C-c z i" . org-roam-node-insert)
