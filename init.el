@@ -16,6 +16,7 @@
 (defvar my/org-roam-papers-dir nil)
 (defvar my/org-roam-cabinet-dir nil)
 (defvar my/org-roam-weekly-dir nil)
+(defvar my/org-roam-daily-dir nil)
 (defvar my/org-roam-archive-dir nil)
 
 ;; MELPAリポジトリを追加
@@ -55,6 +56,7 @@
 (setq my/org-roam-papers-dir (expand-file-name "papers/" my/org-base-directory))
 (setq my/org-roam-cabinet-dir (expand-file-name "cabinet/" my/org-base-directory))
 (setq my/org-roam-weekly-dir (expand-file-name "weekly/" my/org-base-directory))
+(setq my/org-roam-daily-dir (expand-file-name "daily/" my/org-base-directory))
 (setq my/org-roam-archive-dir (expand-file-name "archive/" my/org-base-directory))
 
 (use-package org-roam
@@ -80,47 +82,13 @@
           ("p" "paper" plain "%?"
            :target (file+head "papers/${slug}.org"
                               "#+title: ${title}\n#+date: %U\n#+filetags: :paper:\n\n* 概要\n\n* メモ\n\n")
-           :unnarrowed t)))
-
-  ;; org-capture-templatesの設定
-  (setq org-capture-templates
-        `(("i" "Inbox (org-roam)" entry
-           (file ,(expand-file-name "inbox.org" my/org-roam-cabinet-dir))
-           "* INBOX %?\n"
-           :prepend nil
-           :empty-lines 1))))
+           :unnarrowed t))))
 
 ;; =======================================================================
 ;; org-roam 新機能: inbox, 週次ページ, プロジェクト管理
 ;; -----------------------------------------------------------------------
 ;; org-roamを使ったGTDワークフローの機能を提供
 ;; =======================================================================
-
-(with-eval-after-load 'org-roam
-  ;; -----------------------------------------------------------------------
-  ;; inbox機能
-  ;; -----------------------------------------------------------------------
-  (defun my/org-roam-inbox-open ()
-    "Open or create org-roam inbox file."
-    (interactive)
-    (let ((inbox-file (expand-file-name "inbox.org" my/org-roam-cabinet-dir)))
-      (unless (file-exists-p inbox-file)
-        (make-directory my/org-roam-cabinet-dir t)
-        (with-temp-file inbox-file
-          (insert "#+title: Inbox\n")
-          (insert "#+date: " (format-time-string "[%Y-%m-%d %a]") "\n")
-          (insert "#+filetags: :inbox:\n\n")
-          (insert "* INBOX\n\n")))
-      (find-file inbox-file)))
-
-  (defun my/org-roam-inbox-capture ()
-    "Capture to org-roam inbox using org-capture."
-    (interactive)
-    (make-directory my/org-roam-cabinet-dir t)
-    (org-capture nil "i")))
-
-(global-set-key (kbd "C-c n i") #'my/org-roam-inbox-capture)
-(global-set-key (kbd "C-c n o") #'my/org-roam-inbox-open)
 
 ;; -----------------------------------------------------------------------
 ;; 週次ページ作成機能
@@ -158,6 +126,201 @@
       (org-roam-db-update-file))))
 
 (global-set-key (kbd "C-c n w") #'my/org-roam-weekly-create)
+
+;; -----------------------------------------------------------------------
+;; 日次ログ（Daily Log）作成機能
+;; -----------------------------------------------------------------------
+;; 前日のファイルから指定セクションの内容を取得
+(defun my/get-section-content-from-file (file section-name)
+  "FILE から SECTION-NAME 見出しの内容（サブツリー全体）を返す。
+見出しが存在しない場合は空文字列を返す。"
+  (if (file-exists-p file)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (org-mode)
+        (goto-char (point-min))
+        (if (re-search-forward (concat "^\\* " (regexp-quote section-name) "\\b") nil t)
+            (let ((start (line-beginning-position)))
+              (org-end-of-subtree t t)
+              (buffer-substring-no-properties start (point)))
+          ""))
+    ""))
+
+(defun my/open-today-daily-log-impl ()
+  "Ensure today's daily log file exists with all sections initialized.
+Returns the buffer (for compatibility with capture)."
+  (let* ((base-dir my/org-roam-daily-dir)
+         (rel-path (format-time-string "%Y/%m/%Y-%m-%d.org"))
+         (file     (expand-file-name rel-path base-dir))
+         (new-file (not (file-exists-p file)))
+         (yesterday (time-subtract (current-time) (days-to-time 1)))
+         (yesterday-rel-path (format-time-string "%Y/%m/%Y-%m-%d.org" yesterday))
+         (yesterday-file (expand-file-name yesterday-rel-path base-dir)))
+    ;; ディレクトリがなければ作成
+    (make-directory (file-name-directory file) t)
+    ;; ファイルを開く
+    (set-buffer (find-file-noselect file))
+    ;; 新規ファイルならヘッダと骨組みを挿入
+    (when new-file
+      ;; 前日のファイルから各セクションを取得
+      (let* ((home-content (my/get-section-content-from-file yesterday-file "Home"))
+             (deadline-content (my/get-section-content-from-file yesterday-file "直近の予定締め切り"))
+             (task-content (my/get-section-content-from-file yesterday-file "TASK"))
+             (task-organize-content (my/get-section-content-from-file yesterday-file "タスク整理"))
+             (agile-content (my/get-section-content-from-file yesterday-file "Agile"))
+             (inbox-content (my/get-section-content-from-file yesterday-file "inbox")))
+        (erase-buffer)
+        (insert (format "#+title: %s\n#+filetags: :daily:\n#+OPTIONS: toc:nil num:nil ^:nil tags:nil todo:nil H:10\n#+OPTIONS: broken-links:mark\n#+OPTIONS: tex:t\n#+OPTIONS: html-postamble:nil\n#+OPTIONS: links:nil\n\n"
+                        (format-time-string "%Y-%m-%d")))
+        ;; 前日からコピーするか、空のセクションを作成
+        (if (string-empty-p home-content)
+            (insert "* Home\n\n")
+          (insert home-content "\n"))
+        (if (string-empty-p deadline-content)
+            (insert "* 直近の予定締め切り\n\n")
+          (insert deadline-content "\n"))
+        (if (string-empty-p task-content)
+            (insert "* TASK\n\n")
+          (insert task-content "\n"))
+        (insert "* LOG\n\n")
+        (if (string-empty-p task-organize-content)
+            (insert "* タスク整理\n\n")
+          (insert task-organize-content "\n"))
+        (if (string-empty-p agile-content)
+            (progn
+              (insert "* Agile\n")
+              (insert "** Engineer\n\n")
+              (insert "** Study\n\n")
+              (insert "** 研究\n\n")
+              (insert "** 海外研究\n\n")
+              (insert "** 音楽\n\n"))
+          (insert agile-content "\n"))
+        (insert "* 所感\n\n")
+        (if (string-empty-p inbox-content)
+            (insert "* inbox\n\n")
+          (insert inbox-content "\n")))
+      (save-buffer))
+    ;; inbox セクションがなければ追加
+    (unless (save-excursion
+              (goto-char (point-min))
+              (re-search-forward "^\\* inbox\\b" nil t))
+      (let ((inbox-content (my/get-section-content-from-file yesterday-file "inbox")))
+        (goto-char (point-max))
+        (unless (bolp) (insert "\n"))
+        (if (string-empty-p inbox-content)
+            (insert "* inbox\n\n")
+          (insert inbox-content "\n"))))
+    (current-buffer)))
+
+(defun my/org-daily-log-section (section-name)
+  "Return the end-of-subtree position of SECTION-NAME in today's daily log file.
+If SECTION-NAME doesn't exist, create it at the end of the file."
+  (let* ((buf (my/open-today-daily-log-impl)))
+    (set-buffer buf)
+    (goto-char (point-min))
+    (if (re-search-forward (concat "^\\* " (regexp-quote section-name) "\\b") nil t)
+        (progn
+          (org-end-of-subtree t t)  ;; section-name のサブツリー終わりへ
+          (unless (bolp) (insert "\n"))
+          (current-buffer))
+      ;; section が見つからない場合：最後に作成
+      (goto-char (point-max))
+      (unless (bolp) (insert "\n"))
+      (insert (concat "* " section-name "\n"))
+      (current-buffer))))
+
+(defun my/org-daily-log-file ()
+  "Ensure today's daily log exists and return its file path."
+  (let ((buf (my/open-today-daily-log-impl)))
+    (buffer-file-name buf)))
+
+(defun my/org-capture-inbox-target ()
+  "Ensure today's daily log exists and return the inbox target buffer."
+  (my/open-today-daily-log-impl)
+  (my/org-daily-log-section "inbox"))
+
+(defun my/open-today-daily-log ()
+  "今日の日次ログファイルを一発で開く。
+必要ならファイルと見出しを作成する。"
+  (interactive)
+  ;; my/open-today-daily-log-impl はバッファを返すので、それを switch-to-buffer で表示
+  (let ((buf (my/open-today-daily-log-impl)))
+    (switch-to-buffer buf)
+    ;; LOGの位置に飛ぶ
+    (goto-char (point-min))
+    (when (re-search-forward "^\\* LOG\\b" nil t)
+      (forward-line 1))))
+
+(defun my/open-today-daily-inbox ()
+  "今日の日次ログファイルのinboxセクションを開く。
+必要ならファイルと見出しを作成する。"
+  (interactive)
+  ;; my/open-today-daily-log-impl はバッファを返すので、それを switch-to-buffer で表示
+  (let ((buf (my/open-today-daily-log-impl)))
+    (switch-to-buffer buf)
+    ;; inboxの位置に飛ぶ
+    (goto-char (point-min))
+    (when (re-search-forward "^\\* inbox\\b" nil t)
+      (forward-line 1))))
+
+(global-set-key (kbd "C-c n d") #'my/open-today-daily-log)
+(global-set-key (kbd "C-c n o") #'my/open-today-daily-inbox)
+
+;; -----------------------------------------------------------------------
+;; プロジェクトタグ選択機能
+;; -----------------------------------------------------------------------
+(defun my/org-pick-project-tag ()
+  "projects.org の最上位見出しからプロジェクト名を拾い、タグ文字列を返す。空入力ならタグなし。"
+  (let* ((projects-file (expand-file-name "projects.org" my/org-base-directory))
+         (cands
+          (when (file-exists-p projects-file)
+            (with-current-buffer (find-file-noselect projects-file)
+              (org-mode)
+              (org-map-entries
+               (lambda ()
+                 ;; レベル1見出しのタイトルを取り出す
+                 (nth 4 (org-heading-components)))
+               "LEVEL=1"))))
+         (cands (delete-dups (delq nil cands)))
+         (choice (completing-read
+                  "Project tag (空ならなし): "
+                  cands nil t nil nil "")))
+    (if (string= choice "")
+        ""                              ; タグなし
+      (format " :%s:" (upcase choice))))) ; 例: :arcanain2025:
+
+;; -----------------------------------------------------------------------
+;; org-capture テンプレート設定（daily log ベース）
+;; -----------------------------------------------------------------------
+(setq org-capture-templates
+      `(
+        ;; Inbox (daily logのinboxセクションに追加)
+        ("i" "Inbox task" plain
+         (function my/org-capture-inbox-target)
+         "** INBOX %?")
+
+        ;; Daily log （日時ログ）
+        ("j" "Daily Log" plain
+         (function (lambda () (my/org-daily-log-section "LOG")))
+         "** %<%Y-%m-%d %H:%M> %(my/org-pick-project-tag)\n%?")
+
+        ;; knowledge
+        ("k" "Knowledge" entry
+         (file ,(expand-file-name "knowledge.org" my/org-base-directory))
+         "* %?\n  Created on %U")
+
+        ;; temp
+        ("t" "Temp" entry
+         (file ,(expand-file-name "temp.org" my/org-base-directory))
+         "* %?\n  Created on %U")
+
+        ;; research idea
+        ("r" "research idea" entry
+         (file ,(expand-file-name "idea.org" my/org-base-directory))
+         "* %?\n  Created on %U")))
+
+;; Inbox キャプチャ用キーバインド
+(global-set-key (kbd "C-c n i") (lambda () (interactive) (org-capture nil "i")))
 
 ;; -----------------------------------------------------------------------
 ;; プロジェクト作成機能（タグ + プロパティのハイブリッド方式）
@@ -330,12 +493,12 @@
   "Dynamically generate refile targets including all project files."
   (let ((project-files (when (file-directory-p my/org-roam-projects-dir)
                          (directory-files my/org-roam-projects-dir t "^project_.*\\.org$")))
-        (inbox-file (expand-file-name "inbox.org" my/org-roam-cabinet-dir)))
+        (daily-file (my/org-daily-log-file)))
     (append
      (when project-files
        (list (cons project-files '(:maxlevel . 2))))
-     (when (file-exists-p inbox-file)
-       (list (cons (list inbox-file) '(:maxlevel . 1)))))))
+     (when (and daily-file (file-exists-p daily-file))
+       (list (cons (list daily-file) '(:maxlevel . 1)))))))
 
 (setq org-refile-targets nil)
 (setq org-refile-target-verify-function
@@ -556,12 +719,12 @@
   "Return selected org-roam files for agenda."
   (let ((project-files (when (file-directory-p my/org-roam-projects-dir)
                          (directory-files my/org-roam-projects-dir t "^project_.*\\.org$")))
-        (inbox-file (expand-file-name "inbox.org" my/org-roam-cabinet-dir))
+        (daily-file (my/org-daily-log-file))
         (weekly-files (when (file-directory-p my/org-roam-weekly-dir)
                         (directory-files my/org-roam-weekly-dir t "^[0-9].*\\.org$"))))
     (append
      project-files
-     (when (file-exists-p inbox-file) (list inbox-file))
+     (when (and daily-file (file-exists-p daily-file)) (list daily-file))
      weekly-files)))
 
 (defun my/org-agenda ()
