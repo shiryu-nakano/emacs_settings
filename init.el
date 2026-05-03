@@ -19,7 +19,7 @@
 (defvar my/org-roam-daily-dir nil)
 (defvar my/org-roam-archive-dir nil)
 
-;; MELPAリポジトリを追加
+;; Melpaリポジトリを追加
 (add-to-list 'package-archives
              '("melpa" . "https://melpa.org/packages/") t)
 
@@ -35,7 +35,7 @@
   (unless (package-installed-p package)
     (unless package-archive-contents (package-refresh-contents))
     (package-install package)))
-
+ 
 ;; 必要パッケージの自動インストール
 (ensure-package-installed 'ox-hugo)
 (ensure-package-installed 'evil)
@@ -46,6 +46,10 @@
 ;;(ensure-package-installed 'atom-one-dark-theme)
 
 (require 'ox-hugo)
+
+;; ox-ipynb (org to jupyter notebook)
+(add-to-list 'load-path (expand-file-name "ox-ipynb" user-emacs-directory))
+(require 'ox-ipynb)
 
 ;; 参照用ディレクトリのベースを先に定義
 (setq my/org-base-directory (file-truename "~/CABiNET/org-roam/"))
@@ -130,86 +134,37 @@
 ;; -----------------------------------------------------------------------
 ;; 日次ログ（Daily Log）作成機能
 ;; -----------------------------------------------------------------------
-;; 前日のファイルから指定セクションの内容を取得
-(defun my/get-section-content-from-file (file section-name)
-  "FILE から SECTION-NAME 見出しの内容（サブツリー全体）を返す。
-見出しが存在しない場合は空文字列を返す。"
-  (if (file-exists-p file)
-      (with-temp-buffer
-        (insert-file-contents file)
-        (org-mode)
-        (goto-char (point-min))
-        (if (re-search-forward (concat "^\\* " (regexp-quote section-name) "\\b") nil t)
-            (let ((start (line-beginning-position)))
-              (org-end-of-subtree t t)
-              (buffer-substring-no-properties start (point)))
-          ""))
-    ""))
-
 (defun my/open-today-daily-log-impl ()
-  "Ensure today's daily log file exists with all sections initialized.
-Returns the buffer (for compatibility with capture)."
+  "Ensure today's daily log file exists.
+前日のファイルが存在すれば中身を丸ごとコピーし、タイトルの日付だけ今日に更新する。
+前日ファイルがなければデフォルトテンプレートで新規作成する。
+Returns the buffer."
   (let* ((base-dir my/org-roam-daily-dir)
          (rel-path (format-time-string "%Y/%m/%Y-%m-%d.org"))
          (file     (expand-file-name rel-path base-dir))
          (new-file (not (file-exists-p file)))
          (yesterday (time-subtract (current-time) (days-to-time 1)))
          (yesterday-rel-path (format-time-string "%Y/%m/%Y-%m-%d.org" yesterday))
-         (yesterday-file (expand-file-name yesterday-rel-path base-dir)))
+         (yesterday-file (expand-file-name yesterday-rel-path base-dir))
+         (today-str (format-time-string "%Y-%m-%d")))
     ;; ディレクトリがなければ作成
     (make-directory (file-name-directory file) t)
     ;; ファイルを開く
     (set-buffer (find-file-noselect file))
-    ;; 新規ファイルならヘッダと骨組みを挿入
+    ;; 新規ファイルのみ初期化
     (when new-file
-      ;; 前日のファイルから各セクションを取得
-      (let* ((home-content (my/get-section-content-from-file yesterday-file "Home"))
-             (deadline-content (my/get-section-content-from-file yesterday-file "直近の予定締め切り"))
-             (task-content (my/get-section-content-from-file yesterday-file "TASK"))
-             (task-organize-content (my/get-section-content-from-file yesterday-file "タスク整理"))
-             (agile-content (my/get-section-content-from-file yesterday-file "Agile"))
-             (inbox-content (my/get-section-content-from-file yesterday-file "inbox")))
-        (erase-buffer)
-        (insert (format "#+title: %s\n#+filetags: :daily:\n#+OPTIONS: toc:nil num:nil ^:nil tags:nil todo:nil H:10\n#+OPTIONS: broken-links:mark\n#+OPTIONS: tex:t\n#+OPTIONS: html-postamble:nil\n#+OPTIONS: links:nil\n\n"
-                        (format-time-string "%Y-%m-%d")))
-        ;; 前日からコピーするか、空のセクションを作成
-        (if (string-empty-p home-content)
-            (insert "* Home\n\n")
-          (insert home-content "\n"))
-        (if (string-empty-p deadline-content)
-            (insert "* 直近の予定締め切り\n\n")
-          (insert deadline-content "\n"))
-        (if (string-empty-p task-content)
-            (insert "* TASK\n\n")
-          (insert task-content "\n"))
-        (insert "* LOG\n\n")
-        (if (string-empty-p task-organize-content)
-            (insert "* タスク整理\n\n")
-          (insert task-organize-content "\n"))
-        (if (string-empty-p agile-content)
-            (progn
-              (insert "* Agile\n")
-              (insert "** Engineer\n\n")
-              (insert "** Study\n\n")
-              (insert "** 研究\n\n")
-              (insert "** 海外研究\n\n")
-              (insert "** 音楽\n\n"))
-          (insert agile-content "\n"))
-        (insert "* 所感\n\n")
-        (if (string-empty-p inbox-content)
-            (insert "* inbox\n\n")
-          (insert inbox-content "\n")))
+      (erase-buffer)
+      (if (file-exists-p yesterday-file)
+          ;; 前日ファイルを丸ごとコピーし、タイトルの日付だけ差し替え
+          (progn
+            (insert-file-contents yesterday-file)
+            (goto-char (point-min))
+            (when (re-search-forward "^#\\+title: .*$" nil t)
+              (replace-match (concat "#+title: " today-str))))
+        ;; 前日ファイルがない場合はデフォルトテンプレート
+        (insert (format "#+title: %s\n#+filetags: :daily:\n#+OPTIONS: toc:nil num:nil ^:nil tags:nil todo:nil H:10\n#+OPTIONS: broken-links:mark\n#+OPTIONS: tex:t\n#+OPTIONS: html-postamble:nil\n#+OPTIONS: links:nil\n\n* Home\n\n* TASK\n\n* LOG\n\n* inbox\n\n"
+                        today-str)))
       (save-buffer))
-    ;; inbox セクションがなければ追加
-    (unless (save-excursion
-              (goto-char (point-min))
-              (re-search-forward "^\\* inbox\\b" nil t))
-      (let ((inbox-content (my/get-section-content-from-file yesterday-file "inbox")))
-        (goto-char (point-max))
-        (unless (bolp) (insert "\n"))
-        (if (string-empty-p inbox-content)
-            (insert "* inbox\n\n")
-          (insert inbox-content "\n"))))
     (current-buffer)))
 
 (defun my/org-daily-log-section (section-name)
@@ -265,6 +220,59 @@ If SECTION-NAME doesn't exist, create it at the end of the file."
 
 (global-set-key (kbd "C-c n d") #'my/open-today-daily-log)
 (global-set-key (kbd "C-c n o") #'my/open-today-daily-inbox)
+
+
+;; -----------------------------------------------------------------------
+;; Hugo サイト用 日次ログ（Daily Log）作成機能
+;; -----------------------------------------------------------------------
+(defvar my/hugo-daily-dir
+  (expand-file-name "content/posts/daily/"
+                    (expand-file-name "ghq/github.com/shiryu-nakano/shiryu-nakano.github.io" "~")))
+
+(defun my/hugo-daily-log-impl ()
+  "Ensure today's Hugo daily log file exists.
+前日のファイルが存在すれば中身を丸ごとコピーし、TITLE と URL の日付だけ今日に更新する。
+前日ファイルがなければデフォルトテンプレートで新規作成する。
+Returns the buffer."
+  (let* ((base-dir my/hugo-daily-dir)
+         (today-str (format-time-string "%Y-%m-%d"))
+         (year      (format-time-string "%Y"))
+         (month     (format-time-string "%m"))
+         (day       (format-time-string "%d"))
+         (rel-path  (format "%s/%s/%s.org" year month today-str))
+         (file      (expand-file-name rel-path base-dir))
+         (new-file  (not (file-exists-p file)))
+         (yesterday (time-subtract (current-time) (days-to-time 1)))
+         (yesterday-rel-path (format-time-string "%Y/%m/%Y-%m-%d.org" yesterday))
+         (yesterday-file (expand-file-name yesterday-rel-path base-dir)))
+    (make-directory (file-name-directory file) t)
+    (set-buffer (find-file-noselect file))
+    (when new-file
+      (erase-buffer)
+      (if (file-exists-p yesterday-file)
+          (progn
+            (insert-file-contents yesterday-file)
+            (goto-char (point-min))
+            (when (re-search-forward "^#\\+TITLE: .*$" nil t)
+              (replace-match (concat "#+TITLE: " today-str)))
+            (goto-char (point-min))
+            (when (re-search-forward "^#\\+URL: .*$" nil t)
+              (replace-match (format "#+URL: /posts/daily/%s/%s/%s/" year month day))))
+        (insert (format "#+TITLE: %s\n#+URL: /posts/daily/%s/%s/%s/\n#+filetags: :daily:\n#+OPTIONS: toc:nil num:nil ^:nil tags:nil todo:nil H:10\n#+OPTIONS: broken-links:mark\n#+OPTIONS: tex:t\n#+OPTIONS: html-postamble:nil\n#+OPTIONS: links:nil\n\n* Home\n\n* TASK\n\n* LOG\n\n* inbox\n\n"
+                        today-str year month day)))
+      (save-buffer))
+    (current-buffer)))
+
+(defun my/open-today-hugo-daily-log ()
+  "Hugo サイトの今日の日次ログを開き、LOG セクションにカーソルを移動する。"
+  (interactive)
+  (let ((buf (my/hugo-daily-log-impl)))
+    (switch-to-buffer buf)
+    (goto-char (point-min))
+    (when (re-search-forward "^\\* LOG\\b" nil t)
+      (forward-line 1))))
+
+(global-set-key (kbd "C-c n h") #'my/open-today-hugo-daily-log)
 
 ;; -----------------------------------------------------------------------
 ;; プロジェクトタグ選択機能
@@ -487,30 +495,37 @@ If SECTION-NAME doesn't exist, create it at the end of the file."
 (global-set-key (kbd "C-c n c") #'my/org-roam-capture-with-project-tag)
 
 ;; -----------------------------------------------------------------------
-;; Refile設定（org-roamプロジェクトファイルへのrefile）
+;; タスクアーカイブ機能
 ;; -----------------------------------------------------------------------
-(defun my/org-refile-targets-dynamic ()
-  "Dynamically generate refile targets including all project files."
-  (let ((project-files (when (file-directory-p my/org-roam-projects-dir)
-                         (directory-files my/org-roam-projects-dir t "^project_.*\\.org$")))
-        (daily-file (my/org-daily-log-file)))
-    (append
-     (when project-files
-       (list (cons project-files '(:maxlevel . 2))))
-     (when (and daily-file (file-exists-p daily-file))
-       (list (cons (list daily-file) '(:maxlevel . 1)))))))
+(defun my/archive-task-to-tasks-org ()
+  "Move current heading to archive/tasks.org with timestamp as parent heading."
+  (interactive)
+  (let* ((archive-file (expand-file-name "archive/tasks.org" my/org-base-directory))
+         (timestamp (format-time-string "%Y-%m-%d %H:%M")))
+    ;; archive/tasks.org がなければ作成
+    (unless (file-exists-p archive-file)
+      (make-directory (file-name-directory archive-file) t)
+      (with-temp-file archive-file
+        (insert "#+title: Archived Tasks\n#+filetags: :archive:\n\n")))
+    ;; サブツリーをカット
+    (org-cut-subtree)
+    ;; archive/tasks.org に追加
+    (with-current-buffer (find-file-noselect archive-file)
+      (goto-char (point-max))
+      (unless (bolp) (insert "\n"))
+      ;; 日時を1番目の見出しとして挿入
+      (insert "* " timestamp "\n")
+      ;; タスクを2番目の見出しとして貼り付け
+      (org-paste-subtree 2)
+      ;; 貼り付けた見出しをDONEに変更
+      (org-todo "DONE")
+      (save-buffer))
+    (message "Archived to %s" archive-file)))
 
-(setq org-refile-targets nil)
-(setq org-refile-target-verify-function
-      (lambda ()
-        (setq org-refile-targets (my/org-refile-targets-dynamic))
-        t))
-
-(setq org-outline-path-complete-in-steps nil)
-(setq org-refile-use-outline-path 'file)
-
-(global-set-key (kbd "C-c r") #'org-refile)
-
+;; C-c r をプレフィックスキーとして設定
+(define-prefix-command 'my/refile-map)
+(global-set-key (kbd "C-c r") 'my/refile-map)
+(define-key my/refile-map (kbd "a") #'my/archive-task-to-tasks-org)
 
 
 ;; =======================================================================
@@ -570,7 +585,9 @@ If SECTION-NAME doesn't exist, create it at the end of the file."
 
 ;; Evilモードを有効化
 (when (require 'evil nil 'noerror)
-  (evil-mode 1))
+  (evil-mode 1)
+  ;; vtermではemacs stateにする（ターミナルに直接キー入力を送るため）
+  (evil-set-initial-state 'vterm-mode 'emacs))
 
 ;; "jj"でインサートモードからノーマルモードへ移行
 (when (require 'key-chord nil 'noerror)
@@ -632,11 +649,13 @@ If SECTION-NAME doesn't exist, create it at the end of the file."
 ;; -----------------------------------------------------------------------
 ;; ノート作成、タスク管理、文書作成のための設定です。
 ;; =======================================================================
-(use-package treemacs
+(use-package neotree
   :ensure t
-  :bind
-  (:map global-map
-        ("C-c t" . treemacs)))
+  :bind ("C-c t" . neotree-toggle)
+  :config
+  (setq neo-smart-open t)           ; 現在のファイルを自動で開く
+  (setq neo-window-width 30)        ; ウィンドウ幅
+  (setq neo-theme 'ascii))          ; アイコンテーマ（'icons, 'arrow, 'ascii）
 
 (use-package org-super-agenda
   :ensure t
@@ -671,28 +690,58 @@ If SECTION-NAME doesn't exist, create it at the end of the file."
 (global-set-key (kbd "C-c c") 'org-capture)
 
 
-;; インライン画像の幅をファイルの記述に合わせる
 (setq org-image-actual-width nil)
+;; Emacs 29+: Retinaで LaTeX プレビューが2倍表示される問題の修正
+;; HiDPI環境でのインライン画像の自動スケーリングを無効化
+(setq image-scaling-factor 1.0)
+(setq org-format-latex-options
+      (plist-put org-format-latex-options :scale 0.9))
 
+;;(setq org-format-latex-options
+;;      (plist-put org-format-latex-options :scale 0.4))
 ;; クリップボードからの画像貼り付け機能
 ;; (macOSの'pngpaste'コマンドが必要です)
+;; Hugoサイト内ではstatic/images/に保存（相対パスで参照）、それ以外では従来通りファイル名_image/に保存
 (with-eval-after-load "org"
   (defun org-insert-clipboard-image ()
-    "Generate png file from a clipboard image and insert a link to current buffer."
+    "Generate png file from a clipboard image and insert a link to current buffer.
+If inside a Hugo site (hugo.toml exists), save to static/images/ with relative path.
+Otherwise, save to filename_image/ (legacy behavior)."
     (interactive)
-    (let* ((filename
-            (concat (file-name-nondirectory (buffer-file-name))
-                    "_image/"
-                    (format-time-string "%Y%m%d_%H%M%S")
-                    ".png")))
-      (unless (file-exists-p (file-name-directory filename))
-        (make-directory (file-name-directory filename)))
-      (shell-command (concat "pngpaste " filename))
-      (if (file-exists-p filename)
-          (insert (format "#+ATTR_ORG: :width %d\n" 40))) ; デフォルト幅を設定
-      (if (file-exists-p filename)
-        (insert (concat "[[file:" filename "]]")))
-      (org-display-inline-images)))
+    (let* ((hugo-root (locate-dominating-file default-directory "hugo.toml")))
+      (if hugo-root
+          ;; Hugoサイト内 → static/images/に保存、相対パスで参照
+          (let* ((content-dir (expand-file-name "content" hugo-root))
+                 (current-dir (file-name-directory (buffer-file-name)))
+                 (relative-path (if (string-prefix-p content-dir current-dir)
+                                    (file-relative-name current-dir content-dir)
+                                  ""))
+                 (image-dir (expand-file-name
+                             (concat "static/images/" relative-path)
+                             hugo-root))
+                 (image-name (format-time-string "%Y%m%d_%H%M%S.png"))
+                 (image-file (concat image-dir image-name))
+                 ;; 相対パスを計算: orgファイルからstatic/images/...へ
+                 (org-link (file-relative-name image-file current-dir)))
+            (make-directory image-dir t)
+            (shell-command (concat "pngpaste " image-file))
+            (when (file-exists-p image-file)
+              (insert (format "#+ATTR_ORG: :width %d\n" 40))
+              (insert (concat "[[file:" org-link "]]")))
+            (org-display-inline-images))
+        ;; Hugoサイト外（org-roam等） → 従来通り ファイル名_image/ に保存
+        (let* ((filename
+                (concat (file-name-nondirectory (buffer-file-name))
+                        "_image/"
+                        (format-time-string "%Y%m%d_%H%M%S")
+                        ".png")))
+          (unless (file-exists-p (file-name-directory filename))
+            (make-directory (file-name-directory filename)))
+          (shell-command (concat "pngpaste " filename))
+          (when (file-exists-p filename)
+            (insert (format "#+ATTR_ORG: :width %d\n" 40))
+            (insert (concat "[[file:" filename "]]")))
+          (org-display-inline-images)))))
 
   (global-set-key (kbd "C-x C-y") 'org-insert-clipboard-image))
 
@@ -747,11 +796,11 @@ If SECTION-NAME doesn't exist, create it at the end of the file."
       '((sequence
          "INBOX(i)"   ; 未整理
          "NEXT(n)"    ; 次にとるべき行動
-         "DONE(d)"    ; 完了
          "WIP(c)"     ; 作業中
          "WAIT(w)"    ; 待ち状態
-         "HOLD(h)"    ; 保留
          "|"
+         "DONE(d)"    ; 完了
+         "HOLD(h)"    ; 保留
          "CANCEL(x)"  ; 中止
          )))
 
@@ -856,11 +905,18 @@ If SECTION-NAME doesn't exist, create it at the end of the file."
   ;; python-modeのときだけ有効にするように変更
   :hook (python-mode . flycheck-mode));; python-modeのときだけ有効にするように変更
   
+;; LSPサーバーがフォーマットをサポートしている場合のみ実行する関数
+(defun my/lsp-format-buffer-if-supported ()
+  "Format buffer only if LSP server supports it."
+  (when (and (bound-and-true-p lsp-mode)
+             (lsp-feature? "textDocument/formatting"))
+    (lsp-format-buffer)))
+
 ;; Pythonモード全体に適用する設定
 (add-hook 'python-mode-hook
           (lambda ()
-            ;; 保存時に自動でフォーマット(black)を実行する
-            (add-hook 'before-save-hook #'lsp-format-buffer nil t)))
+            ;; 保存時に自動でフォーマット(black)を実行する（サポートされている場合のみ）
+            (add-hook 'before-save-hook #'my/lsp-format-buffer-if-supported nil t)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -894,7 +950,12 @@ If SECTION-NAME doesn't exist, create it at the end of the file."
 
 ;; vterm
 (use-package vterm
-  :ensure t)
+  :ensure t
+  :bind (:map vterm-mode-map
+              ("C-y" . vterm-yank)
+              ("M-y" . vterm-yank-pop)
+              ("s-v" . vterm-yank)
+              ("C-g" . vterm-send-C-g)))
 
 ;; claude-code-ide
 ;;(use-package claude-code-ide
@@ -907,7 +968,60 @@ If SECTION-NAME doesn't exist, create it at the end of the file."
 (add-to-list 'load-path "~/.emacs.d/claude-code-ide")
 (require 'claude-code-ide)
 
+;; vtermからコピーした際の不要な改行を除去する関数（段落は保持）
+(defun my/normalize-kill-ring ()
+  "Kill-ringの最新エントリから不要な改行を除去し整形する。空行（段落区切り）は保持。"
+  (interactive)
+  (let* ((text (current-kill 0))
+         ;; 1. 段落区切り（2つ以上の連続改行）を一時的にプレースホルダーに置換
+         (normalized (replace-regexp-in-string "\n\\{2,\\}" "<<PARA>>" text))
+         ;; 2. 残りの単一改行（＋前後の空白）をスペースに
+         (normalized (replace-regexp-in-string "[ \t]*\n[ \t]*" " " normalized))
+         ;; 3. プレースホルダーを改行2つに戻す
+         (normalized (replace-regexp-in-string "<<PARA>>" "\n\n" normalized))
+         ;; 4. 連続するスペースを単一に
+         (normalized (replace-regexp-in-string "  +" " " normalized))
+         ;; 5. 先頭・末尾の空白を除去
+         (normalized (string-trim normalized)))
+    (kill-new normalized)
+    (message "Normalized (paragraph preserved)")))
 
+
+;; org mode python 
+(org-babel-do-load-languages
+ 'org-babel-load-languages
+ '((python . t)))
+;;
+;; 確認ダイアログを無効化（任意）
+
+(setq org-confirm-babel-evaluate nil)
+
+;; LuaLaTeX でPDFエクスポート（プレビューに影響しない）
+(defun my/org-export-to-pdf-with-lualatex ()
+  "Export current org buffer to PDF using LuaLaTeX."
+  (interactive)
+  (let ((org-latex-compiler "lualatex")
+        (org-latex-pdf-process
+         '("latexmk -f -pdf -lualatex -interaction=nonstopmode -output-directory=%o %f"))
+        (org-latex-packages-alist
+         (append '(("" "luatexja" t)
+                   ("" "listings" t)
+                   ("" "xcolor" t))
+                 org-latex-packages-alist))
+        ;; listings で囲み付きコードブロック
+        (org-latex-listings t)
+        (org-latex-listings-options
+         '(("frame" "single")
+           ("basicstyle" "\\ttfamily\\small")
+           ("breaklines" "true")))
+        ;; LuaLaTeX では inputenc/fontenc 不要
+        (org-latex-default-packages-alist
+         (seq-remove (lambda (p) (member (cadr p) '("inputenc" "fontenc")))
+                     org-latex-default-packages-alist)))
+    (org-latex-export-to-pdf)))
+
+(with-eval-after-load 'org
+  (define-key org-mode-map (kbd "C-c e l") #'my/org-export-to-pdf-with-lualatex))
 
 ;; --- 設定ファイルの終わり ---
 (custom-set-variables
@@ -919,7 +1033,7 @@ If SECTION-NAME doesn't exist, create it at the end of the file."
  '(custom-safe-themes
    '("2ab8cb6d21d3aa5b821fa638c118892049796d693d1e6cd88cb0d3d7c3ed07fc" "0c83e0b50946e39e237769ad368a08f2cd1c854ccbcd1a01d39fdce4d6f86478" "f64189544da6f16bab285747d04a92bd57c7e7813d8c24c30f382f087d460a33" "b99ff6bfa13f0273ff8d0d0fd17cc44fab71dfdc293c7a8528280e690f084ef0" "e8bd9bbf6506afca133125b0be48b1f033b1c8647c628652ab7a2fe065c10ef0" "bb0f3ae2f6f6f6dbbbe03df66d74ca0aecefa6723ac1686f421dd1ffe26b71c3" "e622620e5f31216fd71e492fc1476e1fe7c21b8dc5811bf9e640c4b1fd6cfac1" "5244ba0273a952a536e07abaad1fdf7c90d7ebb3647f36269c23bfd1cf20b0b8" "9e5e0ff3a81344c9b1e6bfc9b3dcf9b96d5ec6a60d8de6d4c762ee9e2121dfb2" "70c88c01b0b5fde9ecf3bb23d542acba45bb4c5ae0c1330b965def2b6ce6fac3" "166a2faa9dc5b5b3359f7a31a09127ebf7a7926562710367086fcc8fc72145da" "7de64ff2bb2f94d7679a7e9019e23c3bf1a6a04ba54341c36e7cf2d2e56e2bcc" "75eef60308d7328ed14fa27002e85de255c2342e73275173a14ed3aa1643d545" "4d5d11bfef87416d85673947e3ca3d3d5d985ad57b02a7bb2e32beaf785a100e" "a6920ee8b55c441ada9a19a44e9048be3bfb1338d06fc41bce3819ac22e4b5a1" "f053f92735d6d238461da8512b9c071a5ce3b9d972501f7a5e6682a90bf29725" "ff24d14f5f7d355f47d53fd016565ed128bf3af30eb7ce8cae307ee4fe7f3fd0" "df6dfd55673f40364b1970440f0b0cb8ba7149282cf415b81aaad2d98b0f0290" "ba4f725d8e906551cfab8c5f67e71339f60fac11a8815f51051ddb8409ea6e5c" "e4a702e262c3e3501dfe25091621fe12cd63c7845221687e36a79e17cf3a67e0" "8d3ef5ff6273f2a552152c7febc40eabca26bae05bd12bc85062e2dc224cde9a" "c9d837f562685309358d8dc7fccb371ed507c0ae19cf3c9ae67875db0c038632" "f6ea954a9544b0174a876d195387f444da441535ee88c7fb0fc346af08b0d228" "c07f072a88bed384e51833e09948a8ab7ca88ad0e8b5352334de6d80e502da8c" "6963de2ec3f8313bb95505f96bf0cf2025e7b07cefdb93e3d2e348720d401425" "dd4582661a1c6b865a33b89312c97a13a3885dc95992e2e5fc57456b4c545176" "f1e8339b04aef8f145dd4782d03499d9d716fdc0361319411ac2efc603249326" "b7a09eb77a1e9b98cafba8ef1bd58871f91958538f6671b22976ea38c2580755" "a9eeab09d61fef94084a95f82557e147d9630fbbb82a837f971f83e66e21e5ad" "e1df746a4fa8ab920aafb96c39cd0ab0f1bac558eff34532f453bd32c687b9d6" "4b88b7ca61eb48bb22e2a4b589be66ba31ba805860db9ed51b4c484f3ef612a7" "c3c135e69890de6a85ebf791017d458d3deb3954f81dcb7ac8c430e1620bb0f1" "dfb1c8b5bfa040b042b4ef660d0aab48ef2e89ee719a1f24a4629a0c5ed769e8" "599f72b66933ea8ba6fce3ae9e5e0b4e00311c2cbf01a6f46ac789227803dd96" "22a0d47fe2e6159e2f15449fcb90bbf2fe1940b185ff143995cc604ead1ea171" "456697e914823ee45365b843c89fbc79191fdbaff471b29aad9dcbe0ee1d5641" "83550d0386203f010fa42ad1af064a766cfec06fc2f42eb4f2d89ab646f3ac01" "9b9d7a851a8e26f294e778e02c8df25c8a3b15170e6f9fd6965ac5f2544ef2a9" "b5fd9c7429d52190235f2383e47d340d7ff769f141cd8f9e7a4629a81abc6b19" "720838034f1dd3b3da66f6bd4d053ee67c93a747b219d1c546c41c4e425daf93" "1f292969fc19ba45fbc6542ed54e58ab5ad3dbe41b70d8cb2d1f85c22d07e518" "7c3d62a64bafb2cc95cd2de70f7e4446de85e40098ad314ba2291fc07501b70c" "02d422e5b99f54bd4516d4157060b874d14552fe613ea7047c4a5cfa1288cf4f" "8c7e832be864674c220f9a9361c851917a93f921fedb7717b1b5ece47690c098" "aec7b55f2a13307a55517fdf08438863d694550565dee23181d2ebd973ebd6b8" default))
  '(package-selected-packages
-   '(vterm atom-one-dark-theme org-super-agenda org-bullets ox-hugo py-autopep8 material-theme magit key-chord flycheck evil elpy ein dap-mode blacken better-defaults)))
+   '(neotree vterm atom-one-dark-theme org-super-agenda org-bullets ox-hugo py-autopep8 material-theme magit key-chord flycheck evil elpy ein dap-mode blacken better-defaults)))
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.
